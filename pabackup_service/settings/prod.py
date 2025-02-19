@@ -52,9 +52,6 @@ STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/{AWS_LOCATION}/"
 
 
 # ================================ EMAIL =======================================
-AUTO_SCRAPE_EMAIL_PROPERTY_URLS = config("AUTO_SCRAPE_EMAIL_PROPERTY_URLS")
-AUTO_ANALYZE_EMAIL_PROPERTY_URLS = config("AUTO_ANALYZE_EMAIL_PROPERTY_URLS")
-
 # EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 # EMAIL_HOST = 'smtp.office365.com'  # 'smtp.outlook.office365.com'
@@ -90,13 +87,6 @@ CHANNEL_LAYERS = {"default": default_channel_layer}
 
 
 # ================================ CELERY =======================================
-CELERY_BEAT_SCHEDULE = {
-    "fetch-gmail-for-all-users": {
-        "task": "email_integration.tasks.trigger_all_gmail_fetches",
-        "schedule": crontab(hour=8, minute=0),
-    },
-}
-
 # Use the actual IP address and port of your Redis server
 CELERY_BROKER_URL = config("REDIS_URL")
 CELERY_RESULT_BACKEND = config("REDIS_URL")
