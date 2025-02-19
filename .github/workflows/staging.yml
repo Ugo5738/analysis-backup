@@ -48,6 +48,10 @@ jobs:
           # -------------------------- REDIS CONFIG ----------------------------
           REDIS_URL: ${{ secrets.REDIS_URL }}
 
+          # -------------------------- REDIS CONFIG ----------------------------
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+
           # -------------------------- EXTERNAL APPLICATION ----------------------------
           ORCHESTRATOR_APP_URL: ${{ secrets.ORCHESTRATOR_APP_URL }}
           SCRAPER_SERVICE_URL: ${{ secrets.SCRAPER_SERVICE_URL }}
