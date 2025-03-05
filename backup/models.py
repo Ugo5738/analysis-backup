@@ -1,9 +1,29 @@
 from django.db import models
 
+from helpers.models import TrackingModel
+
 ANALYSIS_SOURCE = [("email", "Email"), ("original", "Original")]
 
 
+class BackupUser(TrackingModel):
+    """
+    A simplified user model for the backup service that stores only the unique phone number
+    (plus timestamps) to track which user analyzed a property.
+    """
+
+    phone_number = models.CharField(max_length=20, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.phone_number
+
+
 class BackupProperty(models.Model):
+    """
+    Backup copy of a property record.
+    """
+
     primary_key = models.IntegerField(unique=True)
     url = models.URLField()
     share_token = models.CharField(max_length=128, blank=True, null=True)
@@ -32,6 +52,18 @@ class BackupProperty(models.Model):
         max_length=20, choices=ANALYSIS_SOURCE, default="original"
     )
 
+    # Association to a backup-specific user (optional at first)
+    user = models.ForeignKey(
+        BackupUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="properties",
+    )
+
+    def __str__(self):
+        return f"Property {self.primary_key} - {self.address or 'No Address'}"
+
     updated_at = models.DateTimeField(auto_now=True)
 
 
@@ -45,6 +77,20 @@ class BackupAnalysisTask(models.Model):
     stage_progress = models.JSONField(default=dict)
     trigger_analysis = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # Association to a backup-specific user (optional)
+    user = models.ForeignKey(
+        BackupUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="analysis_tasks",
+    )
+
+    def __str__(self):
+        return (
+            f"Analysis Task {self.primary_key} for Property {self.property_primary_key}"
+        )
 
 
 class BackupScrapingJob(models.Model):

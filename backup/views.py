@@ -12,11 +12,27 @@ from backup.serializers import (
 
 
 class BackupPropertyView(APIView):
+    """
+    API endpoint to create, update, and list backup properties.
+    """
+
     def post(self, request, *args, **kwargs):
-        serializer = BackupPropertySerializer(data=request.data)
+        primary_key = request.data.get("primary_key")
+
+        try:
+            # If it already exists, we do an update
+            backup_property = BackupProperty.objects.get(primary_key=primary_key)
+            serializer = BackupPropertySerializer(
+                backup_property, data=request.data, partial=True
+            )
+        except BackupProperty.DoesNotExist:
+            # Otherwise create a new one
+            serializer = BackupPropertySerializer(data=request.data)
+
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, *args, **kwargs):
@@ -27,6 +43,10 @@ class BackupPropertyView(APIView):
 
 
 class BackupAnalysisTaskView(APIView):
+    """
+    API endpoint to create and list backup analysis tasks.
+    """
+
     def post(self, request, *args, **kwargs):
         serializer = BackupAnalysisTaskSerializer(data=request.data)
         if serializer.is_valid():
