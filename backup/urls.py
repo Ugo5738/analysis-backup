@@ -8,4 +8,5 @@ urlpatterns = [
         "analysis-task/", views.BackupAnalysisTaskView.as_view(), name="analysis-task"
     ),
     path("scraping-job/", views.BackupScrapingJobView.as_view(), name="scraping-job"),
+    path("floorplan/", views.CompleteBackupFloorPlanView.as_view(), name="floorplan"),
 ]

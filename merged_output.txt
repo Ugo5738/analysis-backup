@@ -1017,10 +1017,30 @@ class Command(BaseCommand):
 # backup/models.py
 from django.db import models
 
+from helpers.models import TrackingModel
+
 ANALYSIS_SOURCE = [("email", "Email"), ("original", "Original")]
 
 
+class BackupUser(TrackingModel):
+    """
+    A simplified user model for the backup service that stores only the unique phone number
+    (plus timestamps) to track which user analyzed a property.
+    """
+
+    phone_number = models.CharField(max_length=20, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.phone_number
+
+
 class BackupProperty(models.Model):
+    """
+    Backup copy of a property record.
+    """
+
     primary_key = models.IntegerField(unique=True)
     url = models.URLField()
     share_token = models.CharField(max_length=128, blank=True, null=True)
@@ -1049,6 +1069,18 @@ class BackupProperty(models.Model):
         max_length=20, choices=ANALYSIS_SOURCE, default="original"
     )
 
+    # Association to a backup-specific user (optional at first)
+    user = models.ForeignKey(
+        BackupUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="properties",
+    )
+
+    def __str__(self):
+        return f"Property {self.primary_key} - {self.address or 'No Address'}"
+
     updated_at = models.DateTimeField(auto_now=True)
 
 
@@ -1062,6 +1094,20 @@ class BackupAnalysisTask(models.Model):
     stage_progress = models.JSONField(default=dict)
     trigger_analysis = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # Association to a backup-specific user (optional)
+    user = models.ForeignKey(
+        BackupUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="analysis_tasks",
+    )
+
+    def __str__(self):
+        return (
+            f"Analysis Task {self.primary_key} for Property {self.property_primary_key}"
+        )
 
 
 class BackupScrapingJob(models.Model):
@@ -1080,21 +1126,50 @@ class BackupScrapingJob(models.Model):
 # backup/serializers.py
 from rest_framework import serializers
 
-from backup.models import BackupAnalysisTask, BackupProperty, BackupScrapingJob
+from backup.models import (
+    BackupAnalysisTask,
+    BackupProperty,
+    BackupScrapingJob,
+    BackupUser,
+)
+
+
+class BackupUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BackupUser
+        fields = ["id", "phone_number"]
 
 
 class BackupPropertySerializer(serializers.ModelSerializer):
+    phone_number = serializers.CharField(write_only=True)
+    user = BackupUserSerializer(read_only=True)
+
     class Meta:
         model = BackupProperty
         fields = "__all__"
         read_only_fields = ("updated_at",)
 
+    def create(self, validated_data):
+        phone = validated_data.pop("phone_number")
+        backup_user, created = BackupUser.objects.get_or_create(phone_number=phone)
+        validated_data["user"] = backup_user
+        return BackupProperty.objects.create(**validated_data)
+
 
 class BackupAnalysisTaskSerializer(serializers.ModelSerializer):
+    phone_number = serializers.CharField(write_only=True)
+    user = BackupUserSerializer(read_only=True)
+
     class Meta:
         model = BackupAnalysisTask
         fields = "__all__"
         read_only_fields = ("updated_at",)
+
+    def create(self, validated_data):
+        phone = validated_data.pop("phone_number")
+        backup_user, created = BackupUser.objects.get_or_create(phone_number=phone)
+        validated_data["user"] = backup_user
+        return BackupAnalysisTask.objects.create(**validated_data)
 
 
 class BackupScrapingJobSerializer(serializers.ModelSerializer):
@@ -1504,6 +1579,10 @@ from backup.serializers import (
 
 
 class BackupPropertyView(APIView):
+    """
+    API endpoint to create, update, and list backup properties.
+    """
+
     def post(self, request, *args, **kwargs):
         primary_key = request.data.get("primary_key")
 
@@ -1531,6 +1610,10 @@ class BackupPropertyView(APIView):
 
 
 class BackupAnalysisTaskView(APIView):
+    """
+    API endpoint to create and list backup analysis tasks.
+    """
+
     def post(self, request, *args, **kwargs):
         serializer = BackupAnalysisTaskSerializer(data=request.data)
         if serializer.is_valid():
@@ -2351,301 +2434,5 @@ class MediaStorage(S3Boto3Storage):
     location = "media"
     default_acl = "private"
     file_overwrite = False
-
-
-# docker-compose-prod.yml
-services:
-  web:
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    image: pabackup
-    command: >
-      sh -c " 
-        python manage.py makemigrations &&
-        python manage.py migrate &&  
-        python manage.py populate_db &&
-        daphne pabackup_service.asgi:application -b 0.0.0.0 -p 8000
-      "
-    volumes:
-      - .:/code
-    expose:
-      - "8000"
-    depends_on:
-      - redis
-    container_name: backup-analysis-app
-    environment:
-      - VIRTUAL_HOST=pabackup.supersami.com
-      - LETSENCRYPT_HOST=pabackup.supersami.com
-      - LETSENCRYPT_EMAIL=rolfgroenewold@gmail.com
-
-  redis:
-    image: redis:latest
-    container_name: backup-analysis-app-redis
-  
-  nginx-proxy:
-    image: jwilder/nginx-proxy
-    container_name: nginx_reverse_proxy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - ./certs:/etc/nginx/certs:ro
-      - ./nginx/vhost.d:/etc/nginx/vhost.d
-      - ./nginx/html:/usr/share/nginx/html
-      # - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    environment:
-      - DEFAULT_HOST=pabackup.supersami.com
-
-  letsencrypt-nginx-proxy-companion:
-    image: jrcs/letsencrypt-nginx-proxy-companion
-    container_name: nginx_letsencrypt
-    depends_on:
-      - nginx-proxy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./certs:/etc/nginx/certs:rw
-      - ./nginx/vhost.d:/etc/nginx/vhost.d
-      - ./nginx/html:/usr/share/nginx/html
-      - ./nginx/acme.sh:/etc/acme.sh
-    environment:
-      - NGINX_PROXY_CONTAINER=nginx_reverse_proxy
-      - DEFAULT_EMAIL=rolfgroenewold@gmail.com
-
-  celery:
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    image: pabackup
-    command: >
-      sh -c "
-        echo 'Waiting for backup-analysis-app and redis...';
-        while ! nc -z backup-analysis-app 8000 || ! nc -z redis 6379; do
-          sleep 1;
-        done;
-        echo 'Web and Redis are up - starting celery worker';
-        celery -A pabackup_service worker --loglevel=info;
-      "
-    volumes:
-      - .:/code
-    depends_on:
-      - redis
-      - web
-    container_name: backup-analysis-app-celery
-
-
-# docker-compose-staging.yml
-services:
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: >
-      sh -c "
-        python manage.py makemigrations &&
-        python manage.py migrate &&
-        daphne pabackup_service.asgi:application -b 0.0.0.0 -p 8000
-      "
-    volumes:
-      - .:/code
-    expose:
-      - "8000"
-    depends_on:
-      - redis
-    container_name: analysis-app
-    environment:
-      - VIRTUAL_HOST=api-test.supersami.com
-      - LETSENCRYPT_HOST=api-test.supersami.com
-      - LETSENCRYPT_EMAIL=rolfgroenewold@gmail.com
-
-  redis:
-    image: redis:latest
-    container_name: analysis-app-redis
-  
-  nginx-proxy:
-    image: jwilder/nginx-proxy
-    container_name: nginx_reverse_proxy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - ./certs:/etc/nginx/certs:ro
-      - ./nginx/vhost.d:/etc/nginx/vhost.d
-      - ./nginx/html:/usr/share/nginx/html
-      # - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    environment:
-      - DEFAULT_HOST=api-test.supersami.com
-
-  letsencrypt-nginx-proxy-companion:
-    image: jrcs/letsencrypt-nginx-proxy-companion
-    container_name: nginx_letsencrypt
-    depends_on:
-      - nginx-proxy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./certs:/etc/nginx/certs:rw
-      - ./nginx/vhost.d:/etc/nginx/vhost.d
-      - ./nginx/html:/usr/share/nginx/html
-      - ./nginx/acme.sh:/etc/acme.sh
-    environment:
-      - NGINX_PROXY_CONTAINER=nginx_reverse_proxy
-      - DEFAULT_EMAIL=rolfgroenewold@gmail.com
-
-  celery:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: >
-      sh -c "
-        echo 'Waiting for analysis-app and redis...';
-        while ! nc -z analysis-app 8000 || ! nc -z redis 6379; do
-          sleep 1;
-        done;
-        echo 'Web and Redis are up - starting celery worker';
-        celery -A pabackup_service worker --loglevel=info
-      "
-    volumes:
-      - .:/code
-    depends_on:
-      - redis
-    container_name: analysis-app-celery
-
-
-# docker-compose.yml
-services:
-  web:
-    container_name: analysis-app
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: >
-      sh -c "
-        python manage.py makemigrations &&
-        python manage.py migrate &&
-        daphne pabackup_service.asgi:application -b 0.0.0.0 -p 8000
-      "
-    volumes:
-      - .:/code
-    ports:
-      - '8000:8000'
-    depends_on:
-      - redis
-    networks:
-      - default
-
-  redis:
-    container_name: analysis-app-redis
-    image: redis:latest
-    networks:
-      - default
-
-  celery:
-    container_name: analysis-app-celery
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: >
-      sh -c "
-        echo 'Waiting for analysis-app and redis...';
-        while ! nc -z analysis-app 8000 || ! nc -z redis 6379; do
-          sleep 1;
-        done;
-        echo 'Web and Redis are up - starting celery worker';
-        celery -A pabackup_service worker --loglevel=info -Q analysis_queue
-      "
-    volumes:
-      - .:/code
-    depends_on:
-      - redis
-    networks:
-      - default
-    
-networks:
-  default:
-    name: shared_network
-    external: true
-
-
-# Dockerfile
-# Pull the base image
-FROM python:3.9
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-
-# Install necessary system dependencies
-RUN apt-get update -y && \
-    apt-get install -y \
-    openjdk-17-jdk \
-    netcat-openbsd \
-    wget \
-    gnupg \
-    curl \
-    chromium \
-    chromium-driver
-
-# Install Node.js for Playwright
-RUN curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && \
-    apt-get install -y nodejs
-
-# Clean up APT when done
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Set work directory
-WORKDIR /code
-
-# Copy project
-COPY . /code/
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Set execute permission for entrypoint.sh
-RUN chmod +x /code/entrypoint.sh
-
-ENTRYPOINT ["/code/entrypoint.sh"]
-
-# Run the application
-CMD ["daphne", "pabackup_service.asgi:application", "--port", "$PORT", "--bind", "0.0.0.0"]
-
-
-# requirements.txt
-boto3
-celery
-channels
-channels-redis
-daphne
-Django
-dj-rest-auth
-django-allauth
-django-cors-headers
-django-countries
-django-extensions
-django-filter
-django-ratelimit
-django-rest-passwordreset
-django-rest-swagger
-django-storages
-djangorestframework
-djangorestframework-simplejwt
-dj-database-url
-drf-spectacular
-drf-yasg
-more-itertools
-openai==1.56.0
-opencv-python
-openpyxl
-pandas
-Pillow
-pyspellchecker
-python-decouple
-python-dotenv
-python-Levenshtein
-psycopg2-binary
-requests
 
 

@@ -104,3 +104,139 @@ class BackupScrapingJob(models.Model):
     scraped_property_id = models.IntegerField(null=True, blank=True)
     task_id = models.IntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+# === Floorplan Models ===
+
+
+# Mimic floorplan/models.py: FloorPlanAnalysisResult
+class BackupFloorPlanAnalysisResult(TrackingModel):
+    message = models.CharField(max_length=255)
+    user_id = models.CharField(max_length=255)
+    property_id = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user_id} - {self.property_id}"
+
+
+# Mimic FloorPlan model
+class BackupFloorPlan(TrackingModel):
+    analysis_result = models.ForeignKey(
+        BackupFloorPlanAnalysisResult,
+        related_name="backup_floor_plans",
+        on_delete=models.CASCADE,
+    )
+    floorplan_id = models.CharField(max_length=255)
+    original_url = models.URLField()
+
+    def __str__(self):
+        return self.floorplan_id
+
+
+# Mimic AllFloorsData model
+class BackupAllFloorsData(TrackingModel):
+    floor_plan = models.OneToOneField(
+        BackupFloorPlan, related_name="backup_all_floors_data", on_delete=models.CASCADE
+    )
+    json_file_url = models.URLField()
+    csv_url = models.URLField()
+    total_area_csv_url = models.URLField()
+    image_labelme_side_by_side_url = models.URLField()
+    notes = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"Backup All Floors Data for {self.floor_plan.floorplan_id}"
+
+
+# Mimic PlanFloor model
+class BackupPlanFloor(TrackingModel):
+    floor_plan = models.ForeignKey(
+        BackupFloorPlan, related_name="backup_plan_floors", on_delete=models.CASCADE
+    )
+    floor = models.CharField(max_length=255)
+    label_me_url = models.URLField()
+    json_file_url = models.URLField()
+    image_url = models.URLField()
+    labelme_image_url = models.URLField()
+    csv_url = models.URLField()
+    image_side_by_side_url = models.URLField()
+
+    def __str__(self):
+        return f"{self.floor} - {self.floor_plan.floorplan_id}"
+
+
+# Mimic CsvFloor model
+class BackupCsvFloor(TrackingModel):
+    all_floors_data = models.ForeignKey(
+        BackupAllFloorsData, related_name="backup_csv_floors", on_delete=models.CASCADE
+    )
+    floor_name = models.CharField(max_length=100, null=True, blank=True)
+    calculated_total_area_metric = models.FloatField(null=True, blank=True)
+    calculated_total_area_imperial = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return self.floor_name
+
+
+# Mimic CsvRoom model
+class BackupCsvRoom(TrackingModel):
+    floor = models.ForeignKey(
+        BackupCsvFloor, on_delete=models.CASCADE, related_name="backup_rooms"
+    )
+    room_name = models.CharField(max_length=100, null=True, blank=True)
+    is_segment = models.CharField(max_length=50, null=True, blank=True)
+    room_id = models.FloatField(null=True, blank=True)
+    no_of_doors = models.FloatField(null=True, blank=True)
+    no_of_windows = models.FloatField(null=True, blank=True)
+    no_of_room_points = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.room_name} ({self.floor.floor_name})"
+
+
+# Mimic CsvRoomPixelData model
+class BackupCsvRoomPixelData(TrackingModel):
+    room = models.OneToOneField(
+        BackupCsvRoom, on_delete=models.CASCADE, related_name="backup_pixel_data"
+    )
+    min_x_pixels = models.FloatField(null=True, blank=True)
+    min_y_pixels = models.FloatField(null=True, blank=True)
+    max_x_pixels = models.FloatField(null=True, blank=True)
+    max_y_pixels = models.FloatField(null=True, blank=True)
+    max_area_pixels = models.FloatField(null=True, blank=True)
+    actual_area_pixels = models.FloatField(null=True, blank=True)
+    pixel_ratio = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Backup Pixel Data for {self.room.room_name}"
+
+
+# Mimic CsvRoomDimensions model
+class BackupCsvRoomDimensions(TrackingModel):
+    room = models.OneToOneField(
+        BackupCsvRoom, on_delete=models.CASCADE, related_name="backup_dimensions"
+    )
+    dimensions_imperial = models.CharField(max_length=100, null=True, blank=True)
+    dimensions_metric = models.CharField(max_length=100, null=True, blank=True)
+    max_area_metric = models.FloatField(null=True, blank=True)
+    max_area_imperial = models.FloatField(null=True, blank=True)
+    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
+    calculated_floor_total_sq_area_metric = models.FloatField(null=True, blank=True)
+    calculated_area_imperial = models.FloatField(null=True, blank=True)
+    calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Backup Dimensions for {self.room.room_name}"
+
+
+# Mimic CsvRoomScalingFactors model
+class BackupCsvRoomScalingFactors(TrackingModel):
+    room = models.OneToOneField(
+        BackupCsvRoom, on_delete=models.CASCADE, related_name="backup_scaling_factors"
+    )
+    scale_metric = models.FloatField(null=True, blank=True)
+    scale_imperial = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Backup Scaling Factors for {self.room.room_name}"
