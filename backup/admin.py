@@ -3,7 +3,20 @@ from django.contrib.admin import SimpleListFilter
 from django.urls import reverse
 from django.utils.html import format_html
 
-from .models import BackupAnalysisTask, BackupProperty, BackupScrapingJob
+from backup.models import (
+    BackupAllFloorsData,
+    BackupAnalysisTask,
+    BackupCsvFloor,
+    BackupCsvRoom,
+    BackupCsvRoomDimensions,
+    BackupCsvRoomPixelData,
+    BackupCsvRoomScalingFactors,
+    BackupFloorPlan,
+    BackupFloorPlanAnalysisResult,
+    BackupPlanFloor,
+    BackupProperty,
+    BackupScrapingJob,
+)
 
 
 class AnalysisSourceFilter(SimpleListFilter):
@@ -348,3 +361,90 @@ class BackupScrapingJobAdmin(admin.ModelAdmin):
         return "-"
 
     task_link.short_description = "Analysis Task"
+
+
+@admin.register(BackupFloorPlanAnalysisResult)
+class BackupFloorPlanAnalysisResultAdmin(admin.ModelAdmin):
+    list_display = ("id", "message", "user_id", "property_id", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("user_id", "property_id")
+
+
+@admin.register(BackupFloorPlan)
+class BackupFloorPlanAdmin(admin.ModelAdmin):
+    list_display = ("id", "floorplan_id", "original_url", "analysis_result")
+    list_filter = ("analysis_result",)
+    search_fields = ("floorplan_id",)
+
+
+@admin.register(BackupAllFloorsData)
+class BackupAllFloorsDataAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "floor_plan",
+        "json_file_url",
+        "csv_url",
+        "total_area_csv_url",
+        "image_labelme_side_by_side_url",
+    )
+    search_fields = ("floor_plan__floorplan_id",)
+
+
+@admin.register(BackupPlanFloor)
+class BackupPlanFloorAdmin(admin.ModelAdmin):
+    list_display = ("id", "floor", "floor_plan", "label_me_url")
+    search_fields = ("floor_plan__floorplan_id", "floor")
+
+
+@admin.register(BackupCsvFloor)
+class BackupCsvFloorAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "floor_name",
+        "calculated_total_area_metric",
+        "calculated_total_area_imperial",
+        "all_floors_data",
+    )
+    list_filter = ("floor_name",)
+    search_fields = ("floor_name",)
+
+
+@admin.register(BackupCsvRoom)
+class BackupCsvRoomAdmin(admin.ModelAdmin):
+    list_display = ("id", "room_name", "floor", "room_id")
+    search_fields = ("room_name",)
+
+
+@admin.register(BackupCsvRoomPixelData)
+class BackupCsvRoomPixelDataAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "room",
+        "min_x_pixels",
+        "min_y_pixels",
+        "max_x_pixels",
+        "max_y_pixels",
+        "max_area_pixels",
+        "actual_area_pixels",
+        "pixel_ratio",
+    )
+    search_fields = ("room__room_name",)
+
+
+@admin.register(BackupCsvRoomDimensions)
+class BackupCsvRoomDimensionsAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "room",
+        "dimensions_imperial",
+        "dimensions_metric",
+        "max_area_metric",
+        "max_area_imperial",
+    )
+    search_fields = ("room__room_name",)
+
+
+@admin.register(BackupCsvRoomScalingFactors)
+class BackupCsvRoomScalingFactorsAdmin(admin.ModelAdmin):
+    list_display = ("id", "room", "scale_metric", "scale_imperial")
+    search_fields = ("room__room_name",)

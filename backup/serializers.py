@@ -62,6 +62,7 @@ class BackupScrapingJobSerializer(serializers.ModelSerializer):
         read_only_fields = ("updated_at",)
 
 
+# ––––––– Analysis Result and FloorPlan Serializers –––––––
 class BackupFloorPlanAnalysisResultSerializer(serializers.ModelSerializer):
     class Meta:
         model = BackupFloorPlanAnalysisResult
@@ -75,61 +76,97 @@ class BackupFloorPlanSerializer(serializers.ModelSerializer):
         model = BackupFloorPlan
         fields = "__all__"
 
+    def create(self, validated_data):
+        analysis_result_data = validated_data.pop("analysis_result")
+        analysis_result = BackupFloorPlanAnalysisResult.objects.create(
+            **analysis_result_data
+        )
+        backup_floorplan = BackupFloorPlan.objects.create(
+            analysis_result=analysis_result, **validated_data
+        )
+        return backup_floorplan
 
+
+# ––––––– Nested All Floors Data (including CSV floors/rooms) –––––––
 class BackupAllFloorsDataSerializer(serializers.ModelSerializer):
+    # Include nested CSV floors data via a raw list (you can later enhance this with a nested serializer)
+    backup_csv_floors = serializers.ListField(
+        child=serializers.DictField(), required=False
+    )
+
     class Meta:
         model = BackupAllFloorsData
         fields = "__all__"
 
+    def create(self, validated_data):
+        csv_floors_data = validated_data.pop("backup_csv_floors", [])
+        all_floors_data = BackupAllFloorsData.objects.create(**validated_data)
+        for csv_floor_data in csv_floors_data:
+            backup_rooms_data = csv_floor_data.pop("backup_rooms", [])
+            csv_floor = BackupCsvFloor.objects.create(
+                all_floors_data=all_floors_data, **csv_floor_data
+            )
+            for room_data in backup_rooms_data:
+                # Extract and remove nested room data if available
+                backup_pixel_data = room_data.pop("backup_pixel_data", None)
+                backup_dimensions = room_data.pop("backup_dimensions", None)
+                backup_scaling_factors = room_data.pop("backup_scaling_factors", None)
+                room = BackupCsvRoom.objects.create(floor=csv_floor, **room_data)
+                if backup_pixel_data:
+                    BackupCsvRoomPixelData.objects.create(
+                        room=room, **backup_pixel_data
+                    )
+                if backup_dimensions:
+                    BackupCsvRoomDimensions.objects.create(
+                        room=room, **backup_dimensions
+                    )
+                if backup_scaling_factors:
+                    BackupCsvRoomScalingFactors.objects.create(
+                        room=room, **backup_scaling_factors
+                    )
+        return all_floors_data
 
+
+# ––––––– Plan Floor Serializer –––––––
 class BackupPlanFloorSerializer(serializers.ModelSerializer):
     class Meta:
         model = BackupPlanFloor
         fields = "__all__"
 
 
-class BackupCsvRoomPixelDataSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = BackupCsvRoomPixelData
-        fields = "__all__"
-
-
-class BackupCsvRoomDimensionsSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = BackupCsvRoomDimensions
-        fields = "__all__"
-
-
-class BackupCsvRoomScalingFactorsSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = BackupCsvRoomScalingFactors
-        fields = "__all__"
-
-
-class BackupCsvRoomSerializer(serializers.ModelSerializer):
-    backup_pixel_data = BackupCsvRoomPixelDataSerializer(required=False)
-    backup_dimensions = BackupCsvRoomDimensionsSerializer(required=False)
-    backup_scaling_factors = BackupCsvRoomScalingFactorsSerializer(required=False)
-
-    class Meta:
-        model = BackupCsvRoom
-        fields = "__all__"
-
-
-class BackupCsvFloorSerializer(serializers.ModelSerializer):
-    backup_rooms = BackupCsvRoomSerializer(many=True, required=False)
-
-    class Meta:
-        model = BackupCsvFloor
-        fields = "__all__"
-
-
-# Finally, a serializer for the complete floorplan backup payload:
+# ––––––– Complete FloorPlan Backup Serializer –––––––
 class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
+    analysis_result = BackupFloorPlanAnalysisResultSerializer()
     backup_all_floors_data = BackupAllFloorsDataSerializer(required=False)
     backup_plan_floors = BackupPlanFloorSerializer(many=True, required=False)
-    # You can nest additional serializers for CSV data if needed
 
     class Meta:
         model = BackupFloorPlan
         fields = "__all__"
+
+    def create(self, validated_data):
+        analysis_result_data = validated_data.pop("analysis_result")
+        backup_all_floors_data_data = validated_data.pop("backup_all_floors_data", None)
+        backup_plan_floors_data = validated_data.pop("backup_plan_floors", [])
+
+        # Create the analysis result and floorplan
+        analysis_result = BackupFloorPlanAnalysisResult.objects.create(
+            **analysis_result_data
+        )
+        backup_floorplan = BackupFloorPlan.objects.create(
+            analysis_result=analysis_result, **validated_data
+        )
+
+        # Create the all floors data (with nested CSV floors/rooms) if provided
+        if backup_all_floors_data_data:
+            backup_all_floors_data_data["floor_plan"] = backup_floorplan
+            serializer = BackupAllFloorsDataSerializer(data=backup_all_floors_data_data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+        # Create plan floors
+        for plan_floor_data in backup_plan_floors_data:
+            plan_floor_data["floor_plan"] = backup_floorplan
+            BackupPlanFloor.objects.create(**plan_floor_data)
+
+        return backup_floorplan
