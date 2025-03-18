@@ -97,6 +97,9 @@ class BackupAllFloorsDataSerializer(serializers.ModelSerializer):
     class Meta:
         model = BackupAllFloorsData
         fields = "__all__"
+        extra_kwargs = {
+            "floor_plan": {"read_only": True},  # Mark floor_plan as read-only
+        }
 
     def create(self, validated_data):
         csv_floors_data = validated_data.pop("backup_csv_floors", [])
@@ -132,6 +135,9 @@ class BackupPlanFloorSerializer(serializers.ModelSerializer):
     class Meta:
         model = BackupPlanFloor
         fields = "__all__"
+        extra_kwargs = {
+            "floor_plan": {"read_only": True},  # Mark floor_plan as read-only
+        }
 
 
 # ––––––– Complete FloorPlan Backup Serializer –––––––
@@ -149,7 +155,7 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
         backup_all_floors_data_data = validated_data.pop("backup_all_floors_data", None)
         backup_plan_floors_data = validated_data.pop("backup_plan_floors", [])
 
-        # Create the analysis result and floorplan
+        # Create the analysis result and backup floorplan
         analysis_result = BackupFloorPlanAnalysisResult.objects.create(
             **analysis_result_data
         )
@@ -157,16 +163,17 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
             analysis_result=analysis_result, **validated_data
         )
 
-        # Create the all floors data (with nested CSV floors/rooms) if provided
+        # Create the all floors data with nested CSV floors/rooms if provided.
         if backup_all_floors_data_data:
-            backup_all_floors_data_data["floor_plan"] = backup_floorplan
+            # Pass the backup_floorplan explicitly as floor_plan
             serializer = BackupAllFloorsDataSerializer(data=backup_all_floors_data_data)
             serializer.is_valid(raise_exception=True)
-            serializer.save()
+            serializer.save(floor_plan=backup_floorplan)
 
-        # Create plan floors
+        # Create plan floors, explicitly assigning the floor_plan
         for plan_floor_data in backup_plan_floors_data:
-            plan_floor_data["floor_plan"] = backup_floorplan
-            BackupPlanFloor.objects.create(**plan_floor_data)
+            BackupPlanFloor.objects.create(
+                floor_plan=backup_floorplan, **plan_floor_data
+            )
 
         return backup_floorplan
