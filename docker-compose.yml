@@ -1,6 +1,6 @@
 services:
   web:
-    container_name: analysis-app
+    container_name: backup-app
     build:
       context: .
       dockerfile: Dockerfile
@@ -13,31 +13,31 @@ services:
     volumes:
       - .:/code
     ports:
-      - '8000:8000'
+      - "8000:8000"
     depends_on:
       - redis
     networks:
       - default
 
   redis:
-    container_name: analysis-app-redis
+    container_name: backup-app-redis
     image: redis:latest
     networks:
       - default
 
   celery:
-    container_name: analysis-app-celery
+    container_name: backup-app-celery
     build:
       context: .
       dockerfile: Dockerfile
     command: >
       sh -c "
-        echo 'Waiting for analysis-app and redis...';
-        while ! nc -z analysis-app 8000 || ! nc -z redis 6379; do
+        echo 'Waiting for backup-app and redis...';
+        while ! nc -z backup-app 8000 || ! nc -z redis 6379; do
           sleep 1;
         done;
         echo 'Web and Redis are up - starting celery worker';
-        celery -A pabackup_service worker --loglevel=info -Q analysis_queue
+        celery -A pabackup_service worker --loglevel=info
       "
     volumes:
       - .:/code
@@ -45,7 +45,7 @@ services:
       - redis
     networks:
       - default
-    
+
 networks:
   default:
     name: shared_network

@@ -7,8 +7,8 @@ services:
     command: >
       sh -c " 
         python manage.py makemigrations &&
-        python manage.py migrate &&  
-        python manage.py populate_db &&
+        # python manage.py migrate &&  
+        # python manage.py populate_db &&
         daphne pabackup_service.asgi:application -b 0.0.0.0 -p 8000
       "
     volumes:
@@ -19,14 +19,14 @@ services:
       - redis
     container_name: backup-analysis-app
     environment:
-      - VIRTUAL_HOST=pabackup.supersami.com
-      - LETSENCRYPT_HOST=pabackup.supersami.com
+      - VIRTUAL_HOST=backup.supersami.com
+      - LETSENCRYPT_HOST=backup.supersami.com
       - LETSENCRYPT_EMAIL=rolfgroenewold@gmail.com
 
   redis:
     image: redis:latest
     container_name: backup-analysis-app-redis
-  
+
   nginx-proxy:
     image: jwilder/nginx-proxy
     container_name: nginx_reverse_proxy
@@ -40,7 +40,7 @@ services:
       - ./nginx/html:/usr/share/nginx/html
       # - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     environment:
-      - DEFAULT_HOST=pabackup.supersami.com
+      - DEFAULT_HOST=backup.supersami.com
 
   letsencrypt-nginx-proxy-companion:
     image: jrcs/letsencrypt-nginx-proxy-companion

@@ -1,0 +1,1040 @@
+# backup/models.py
+from django.db import models
+
+from helpers.models import TrackingModel
+
+ANALYSIS_SOURCE = [("email", "Email"), ("original", "Original")]
+
+
+class Property(models.Model):
+    """
+    Backup copy of a property record.
+    """
+
+    primary_key = models.IntegerField(unique=True)
+    url = models.URLField()
+    share_token = models.CharField(max_length=128, blank=True, null=True)
+    phone_number = models.CharField(max_length=20)
+    address = models.CharField(max_length=255, null=True, blank=True)
+    price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    bedrooms = models.IntegerField(null=True, blank=True)
+    bathrooms = models.IntegerField(null=True, blank=True)
+    size = models.CharField(max_length=100, null=True, blank=True)
+    house_type = models.CharField(max_length=100, null=True, blank=True)
+    agent = models.CharField(max_length=255, null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
+    reviewed_description = models.TextField(null=True, blank=True)
+    description_analysis = models.JSONField(null=True, blank=True)
+    sentiment_analysis = models.JSONField(null=True, blank=True)
+    listing_type = models.CharField(max_length=255, null=True, blank=True)
+    time_on_market = models.CharField(max_length=255, null=True, blank=True)
+    features = models.TextField(null=True, blank=True)
+    floorplan_urls = models.JSONField(default=list, blank=True)
+    overall_condition = models.JSONField(null=True, blank=True)
+    detailed_analysis = models.JSONField(null=True, blank=True)
+    failed_downloads = models.JSONField(default=list)
+    image_urls = models.JSONField(default=list)
+    overall_analysis = models.JSONField(null=True, blank=True)
+    analysis_source = models.CharField(
+        max_length=20, choices=ANALYSIS_SOURCE, default="original"
+    )
+
+    def __str__(self):
+        return f"Property {self.primary_key} - {self.address or 'No Address'}"
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class AnalysisTask(models.Model):
+    primary_key = models.IntegerField(unique=True)
+    property_primary_key = models.IntegerField()
+    phone_number = models.CharField(max_length=20)
+    status = models.CharField(max_length=20, default="PENDING")
+    progress = models.FloatField(default=0.0)
+    stage = models.CharField(max_length=50, blank=True)
+    stage_progress = models.JSONField(default=dict)
+    trigger_analysis = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return (
+            f"Analysis Task {self.primary_key} for Property {self.property_primary_key}"
+        )
+
+
+class ScrapingJob(models.Model):
+    primary_key = models.IntegerField(unique=True)
+    url = models.URLField()
+    source = models.CharField(max_length=50)
+    status = models.CharField(max_length=20)
+    callback_url = models.URLField(null=True, blank=True)
+    phone_number = models.CharField(max_length=20)
+    property_id = models.IntegerField(null=True, blank=True)
+    scraped_property_id = models.IntegerField(null=True, blank=True)
+    task_id = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+# === Floorplan Models ===
+
+
+# Mimic floorplan/models.py: FloorPlanAnalysisResult
+class FloorPlanAnalysisResult(TrackingModel):
+    message = models.CharField(max_length=255)
+    user_id = models.CharField(max_length=255)
+    property_id = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user_id} - {self.property_id}"
+
+
+# Mimic FloorPlan model
+class FloorPlan(TrackingModel):
+    analysis_result = models.ForeignKey(
+        FloorPlanAnalysisResult,
+        related_name="backup_floor_plans",
+        on_delete=models.CASCADE,
+    )
+    floorplan_id = models.CharField(max_length=255)
+    original_url = models.URLField()
+
+    def __str__(self):
+        return self.floorplan_id
+
+
+# Mimic AllFloorsData model
+class AllFloorsData(TrackingModel):
+    floor_plan = models.OneToOneField(
+        FloorPlan, related_name="backup_all_floors_data", on_delete=models.CASCADE
+    )
+    json_file_url = models.URLField()
+    csv_url = models.URLField()  # change to all_floors_csv_url
+    total_area_csv_url = models.URLField()
+    image_labelme_side_by_side_url = models.URLField()
+    notes = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"Backup All Floors Data for {self.floor_plan.floorplan_id}"
+
+
+# Mimic PlanFloor model
+class PlanFloor(TrackingModel):
+    floor_plan = models.ForeignKey(
+        FloorPlan, related_name="backup_plan_floors", on_delete=models.CASCADE
+    )
+    floor = models.CharField(max_length=255)
+    label_me_url = models.URLField()
+    json_file_url = models.URLField()
+    image_url = models.URLField()
+    labelme_image_url = models.URLField()
+    csv_url = models.URLField()
+    image_side_by_side_url = models.URLField()
+
+    def __str__(self):
+        return f"{self.floor} - {self.floor_plan.floorplan_id}"
+
+
+# Mimic CsvFloor model
+class CsvFloor(TrackingModel):  # AllFloorsCsvfloor
+    all_floors_data = models.ForeignKey(
+        AllFloorsData, related_name="backup_csv_floors", on_delete=models.CASCADE
+    )
+    floor_name = models.CharField(max_length=100, null=True, blank=True)
+    calculated_total_area_metric = models.FloatField(null=True, blank=True)
+    calculated_total_area_imperial = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return self.floor_name
+
+
+# Mimic CsvRoom model
+class CsvRoom(TrackingModel):
+    csv_floor = models.ForeignKey(  # should be csv_floor
+        CsvFloor, on_delete=models.CASCADE, related_name="backup_rooms"
+    )
+    room_name = models.CharField(max_length=100, null=True, blank=True)
+    is_segment = models.CharField(max_length=50, null=True, blank=True)
+    room_id = models.FloatField(null=True, blank=True)
+    no_of_doors = models.FloatField(null=True, blank=True)
+    no_of_windows = models.FloatField(null=True, blank=True)
+    no_of_room_points = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.room_name} ({self.floor.floor_name})"
+
+
+# Mimic CsvRoomPixelData model
+class CsvRoomPixelData(TrackingModel):
+    csv_room = models.OneToOneField(
+        CsvRoom, on_delete=models.CASCADE, related_name="backup_pixel_data"
+    )
+    min_x_pixels = models.FloatField(null=True, blank=True)
+    min_y_pixels = models.FloatField(null=True, blank=True)
+    max_x_pixels = models.FloatField(null=True, blank=True)
+    max_y_pixels = models.FloatField(null=True, blank=True)
+    max_area_pixels = models.FloatField(null=True, blank=True)
+    actual_area_pixels = models.FloatField(null=True, blank=True)
+    pixel_ratio = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Backup Pixel Data for {self.room.room_name}"
+
+
+# Mimic CsvRoomDimensions model
+class CsvRoomDimensions(TrackingModel):
+    csv_room = models.OneToOneField(
+        CsvRoom, on_delete=models.CASCADE, related_name="backup_dimensions"
+    )
+    dimensions_imperial = models.CharField(max_length=100, null=True, blank=True)
+    dimensions_metric = models.CharField(max_length=100, null=True, blank=True)
+    max_area_metric = models.FloatField(null=True, blank=True)
+    max_area_imperial = models.FloatField(null=True, blank=True)
+    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
+    calculated_floor_total_sq_area_metric = models.FloatField(null=True, blank=True)
+    calculated_area_imperial = models.FloatField(null=True, blank=True)
+    calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Backup Dimensions for {self.room.room_name}"
+
+
+# Mimic CsvRoomScalingFactors model
+class CsvRoomScalingFactors(TrackingModel):
+    csv_room = models.OneToOneField(
+        CsvRoom, on_delete=models.CASCADE, related_name="backup_scaling_factors"
+    )
+    scale_metric = models.FloatField(null=True, blank=True)
+    scale_imperial = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Backup Scaling Factors for {self.room.room_name}"
+
+
+# To scale, remove bottle necks. E.g naming
+
+# AllFloorsData
+#      |
+# CsvFloor
+#      |
+# CsvRoom
+#      |
+# [CsvRoomPixelData + CsvRoomDimensions + CsvRoomScalingFactors]
+
+# future Ugo should be thanking past Ugo not being angry with past Ugo
+# is future Ugo going to be thankful that I am making this decision
+
+
+# backup/serializers.py
+from rest_framework import serializers
+
+from backup.models import (
+    BackupAllFloorsData,
+    BackupAnalysisTask,
+    BackupCsvFloor,
+    BackupCsvRoom,
+    BackupCsvRoomDimensions,
+    BackupCsvRoomPixelData,
+    BackupCsvRoomScalingFactors,
+    BackupFloorPlan,
+    BackupFloorPlanAnalysisResult,
+    BackupPlanFloor,
+    BackupProperty,
+    BackupScrapingJob,
+    BackupUser,
+)
+
+# ––––––– Basic Serializers –––––––
+
+
+class BackupUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BackupUser
+        fields = ["id", "phone_number"]
+
+
+class BackupPropertySerializer(serializers.ModelSerializer):
+    phone_number = serializers.CharField(write_only=True)
+    user = BackupUserSerializer(read_only=True)
+
+    class Meta:
+        model = BackupProperty
+        fields = "__all__"
+        read_only_fields = ("updated_at",)
+
+    def create(self, validated_data):
+        phone = validated_data.pop("phone_number")
+        backup_user, created = BackupUser.objects.get_or_create(phone_number=phone)
+        validated_data["user"] = backup_user
+        return BackupProperty.objects.create(**validated_data)
+
+
+class BackupAnalysisTaskSerializer(serializers.ModelSerializer):
+    phone_number = serializers.CharField(write_only=True)
+    user = BackupUserSerializer(read_only=True)
+
+    class Meta:
+        model = BackupAnalysisTask
+        fields = "__all__"
+        read_only_fields = ("updated_at",)
+
+    def create(self, validated_data):
+        phone = validated_data.pop("phone_number")
+        backup_user, created = BackupUser.objects.get_or_create(phone_number=phone)
+        validated_data["user"] = backup_user
+        return BackupAnalysisTask.objects.create(**validated_data)
+
+
+class BackupScrapingJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BackupScrapingJob
+        fields = "__all__"
+        read_only_fields = ("updated_at",)
+
+
+# ––––––– Nested CSV Data Serializers –––––––
+
+
+class BackupCsvRoomPixelDataSerializer(serializers.ModelSerializer):
+    # Mark 'room' as read-only so it isn’t required in the input.
+    room = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = BackupCsvRoomPixelData
+        fields = "__all__"
+
+
+class BackupCsvRoomDimensionsSerializer(serializers.ModelSerializer):
+    room = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = BackupCsvRoomDimensions
+        fields = "__all__"
+
+
+class BackupCsvRoomScalingFactorsSerializer(serializers.ModelSerializer):
+    room = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = BackupCsvRoomScalingFactors
+        fields = "__all__"
+
+
+class BackupCsvRoomSerializer(serializers.ModelSerializer):
+    # 'floor' will be set automatically during creation.
+    floor = serializers.PrimaryKeyRelatedField(read_only=True)
+    backup_pixel_data = BackupCsvRoomPixelDataSerializer(required=False)
+    backup_dimensions = BackupCsvRoomDimensionsSerializer(required=False)
+    backup_scaling_factors = BackupCsvRoomScalingFactorsSerializer(required=False)
+
+    class Meta:
+        model = BackupCsvRoom
+        fields = "__all__"
+
+
+class BackupCsvFloorSerializer(serializers.ModelSerializer):
+    # 'all_floors_data' is set by the parent so mark it as read-only.
+    all_floors_data = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    # Use nested serializer for rooms.
+    backup_rooms = BackupCsvRoomSerializer(many=True, required=False)
+
+    class Meta:
+        model = BackupCsvFloor
+        fields = "__all__"
+
+
+# ––––––– Nested All Floors Data (including CSV floors/rooms) –––––––
+
+
+class BackupAllFloorsDataSerializer(serializers.ModelSerializer):
+    # Use the nested serializer with many=True
+    backup_csv_floors = BackupCsvFloorSerializer(many=True, required=False)
+
+    class Meta:
+        model = BackupAllFloorsData
+        fields = "__all__"
+        extra_kwargs = {
+            "floor_plan": {"read_only": True},
+        }
+
+    def create(self, validated_data):
+        csv_floors_data = validated_data.pop("backup_csv_floors", [])
+        all_floors_data = BackupAllFloorsData.objects.create(**validated_data)
+        for csv_floor_data in csv_floors_data:
+            backup_rooms_data = csv_floor_data.pop("backup_rooms", [])
+            csv_floor = BackupCsvFloor.objects.create(
+                all_floors_data=all_floors_data, **csv_floor_data
+            )
+            for room_data in backup_rooms_data:
+                # Extract and remove nested room data if available
+                backup_pixel_data = room_data.pop("backup_pixel_data", None)
+                backup_dimensions = room_data.pop("backup_dimensions", None)
+                backup_scaling_factors = room_data.pop("backup_scaling_factors", None)
+                room = BackupCsvRoom.objects.create(floor=csv_floor, **room_data)
+                if backup_pixel_data:
+                    BackupCsvRoomPixelData.objects.create(
+                        room=room, **backup_pixel_data
+                    )
+                if backup_dimensions:
+                    BackupCsvRoomDimensions.objects.create(
+                        room=room, **backup_dimensions
+                    )
+                if backup_scaling_factors:
+                    BackupCsvRoomScalingFactors.objects.create(
+                        room=room, **backup_scaling_factors
+                    )
+        return all_floors_data
+
+
+# ––––––– Analysis Result and FloorPlan Serializers –––––––
+class BackupFloorPlanAnalysisResultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BackupFloorPlanAnalysisResult
+        fields = "__all__"
+
+
+class BackupFloorPlanSerializer(serializers.ModelSerializer):
+    analysis_result = BackupFloorPlanAnalysisResultSerializer()
+
+    class Meta:
+        model = BackupFloorPlan
+        fields = "__all__"
+
+    def create(self, validated_data):
+        analysis_result_data = validated_data.pop("analysis_result")
+        analysis_result = BackupFloorPlanAnalysisResult.objects.create(
+            **analysis_result_data
+        )
+        backup_floorplan = BackupFloorPlan.objects.create(
+            analysis_result=analysis_result, **validated_data
+        )
+        return backup_floorplan
+
+
+# ––––––– Plan Floor Serializer –––––––
+class BackupPlanFloorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BackupPlanFloor
+        fields = "__all__"
+        extra_kwargs = {
+            "floor_plan": {"read_only": True},  # Mark floor_plan as read-only
+        }
+
+
+# ––––––– Complete FloorPlan Backup Serializer –––––––
+class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
+    analysis_result = BackupFloorPlanAnalysisResultSerializer()
+    backup_all_floors_data = BackupAllFloorsDataSerializer(required=False)
+    backup_plan_floors = BackupPlanFloorSerializer(many=True, required=False)
+
+    class Meta:
+        model = BackupFloorPlan
+        fields = "__all__"
+
+    def create(self, validated_data):
+        analysis_result_data = validated_data.pop("analysis_result")
+        backup_all_floors_data_data = validated_data.pop("backup_all_floors_data", None)
+        backup_plan_floors_data = validated_data.pop("backup_plan_floors", [])
+
+        # Create the analysis result and backup floorplan
+        analysis_result = BackupFloorPlanAnalysisResult.objects.create(
+            **analysis_result_data
+        )
+        backup_floorplan = BackupFloorPlan.objects.create(
+            analysis_result=analysis_result, **validated_data
+        )
+
+        # Create the all floors data with nested CSV floors/rooms if provided.
+        if backup_all_floors_data_data:
+            # Pass the backup_floorplan explicitly as floor_plan
+            serializer = BackupAllFloorsDataSerializer(data=backup_all_floors_data_data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save(floor_plan=backup_floorplan)
+
+        # Create plan floors, explicitly assigning the floor_plan
+        for plan_floor_data in backup_plan_floors_data:
+            BackupPlanFloor.objects.create(
+                floor_plan=backup_floorplan, **plan_floor_data
+            )
+
+        return backup_floorplan
+
+
+# backup/__init__.py
+
+
+# backup/apps.py
+from django.apps import AppConfig
+
+
+class BackupConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "backup"
+
+
+# backup/admin.py
+from django.contrib import admin
+from django.contrib.admin import SimpleListFilter
+from django.urls import reverse
+from django.utils.html import format_html
+
+from backup.models import (
+    BackupAllFloorsData,
+    BackupAnalysisTask,
+    BackupCsvFloor,
+    BackupCsvRoom,
+    BackupCsvRoomDimensions,
+    BackupCsvRoomPixelData,
+    BackupCsvRoomScalingFactors,
+    BackupFloorPlan,
+    BackupFloorPlanAnalysisResult,
+    BackupPlanFloor,
+    BackupProperty,
+    BackupScrapingJob,
+)
+
+
+class AnalysisSourceFilter(SimpleListFilter):
+    title = "Analysis Source"
+    parameter_name = "analysis_source"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("email", "Email"),
+            ("original", "Original"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(analysis_source=self.value())
+        return queryset
+
+
+class PropertyStatusFilter(SimpleListFilter):
+    title = "Property Status"
+    parameter_name = "property_status"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("with_analysis", "With Analysis"),
+            ("no_analysis", "No Analysis"),
+            ("with_images", "With Images"),
+            ("no_images", "No Images"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == "with_analysis":
+            return queryset.exclude(overall_analysis__isnull=True)
+        elif self.value() == "no_analysis":
+            return queryset.filter(overall_analysis__isnull=True)
+        elif self.value() == "with_images":
+            return queryset.exclude(image_urls=[])
+        elif self.value() == "no_images":
+            return queryset.filter(image_urls=[])
+        return queryset
+
+
+@admin.register(BackupProperty)
+class BackupPropertyAdmin(admin.ModelAdmin):
+    list_display = (
+        "primary_key",
+        "address",
+        "price_display",
+        "bedrooms",
+        "bathrooms",
+        "house_type",
+        "listing_type",
+        "time_on_market",
+        "analysis_source",
+        "has_images",
+        "has_analysis",
+        "updated_at",
+    )
+    list_filter = (
+        "house_type",
+        "listing_type",
+        AnalysisSourceFilter,
+        PropertyStatusFilter,
+        "updated_at",
+    )
+    search_fields = ("primary_key", "address", "agent", "description")
+    readonly_fields = ("updated_at", "property_url", "image_preview")
+    fieldsets = (
+        (
+            "Basic Information",
+            {
+                "fields": (
+                    "primary_key",
+                    "url",
+                    "property_url",
+                    "share_token",
+                    "phone_number",
+                    "address",
+                )
+            },
+        ),
+        (
+            "Property Details",
+            {
+                "fields": (
+                    "price",
+                    "bedrooms",
+                    "bathrooms",
+                    "size",
+                    "house_type",
+                    "agent",
+                    "listing_type",
+                    "time_on_market",
+                )
+            },
+        ),
+        ("Description", {"fields": ("description", "reviewed_description")}),
+        (
+            "Features and Media",
+            {
+                "fields": (
+                    "features",
+                    "image_preview",
+                    "image_urls",
+                    "floorplan_urls",
+                    "failed_downloads",
+                )
+            },
+        ),
+        (
+            "Analysis",
+            {
+                "fields": (
+                    "description_analysis",
+                    "sentiment_analysis",
+                    "overall_condition",
+                    "detailed_analysis",
+                    "overall_analysis",
+                    "analysis_source",
+                )
+            },
+        ),
+        ("Metadata", {"fields": ("updated_at",)}),
+    )
+
+    def price_display(self, obj):
+        if obj.price:
+            return f"${obj.price:,.2f}"
+        return "-"
+
+    price_display.short_description = "Price"
+
+    def has_images(self, obj):
+        return bool(obj.image_urls)
+
+    has_images.boolean = True
+    has_images.short_description = "Has Images"
+
+    def has_analysis(self, obj):
+        return bool(obj.overall_analysis)
+
+    has_analysis.boolean = True
+    has_analysis.short_description = "Has Analysis"
+
+    def property_url(self, obj):
+        if obj.url:
+            return format_html(
+                '<a href="{}" target="_blank">View Property</a>', obj.url
+            )
+        return "-"
+
+    property_url.short_description = "Property Link"
+
+    def image_preview(self, obj):
+        if not obj.image_urls:
+            return "No images available"
+
+        html = (
+            '<div style="display: flex; flex-wrap: wrap; gap: 10px; max-width: 800px;">'
+        )
+        for i, url in enumerate(obj.image_urls):
+            if i < 5:  # Show first 5 images only
+                html += f'<img src="{url}" style="width: 150px; height: auto; object-fit: cover;" />'
+
+        if len(obj.image_urls) > 5:
+            html += f'<div style="width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; background-color: #f0f0f0;">+{len(obj.image_urls) - 5} more</div>'
+
+        html += "</div>"
+        return format_html(html)
+
+    image_preview.short_description = "Image Preview"
+
+
+class TaskStatusFilter(SimpleListFilter):
+    title = "Task Status"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("PENDING", "Pending"),
+            ("IN_PROGRESS", "In Progress"),
+            ("COMPLETED", "Completed"),
+            ("FAILED", "Failed"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(status=self.value())
+        return queryset
+
+
+@admin.register(BackupAnalysisTask)
+class BackupAnalysisTaskAdmin(admin.ModelAdmin):
+    list_display = (
+        "primary_key",
+        "property_link",
+        "status",
+        "progress_display",
+        "stage",
+        "trigger_analysis",
+        "updated_at",
+    )
+    list_filter = (TaskStatusFilter, "trigger_analysis", "updated_at")
+    search_fields = ("primary_key", "property_primary_key", "phone_number")
+    readonly_fields = ("updated_at", "property_link", "progress_bar")
+    fieldsets = (
+        (
+            "Task Information",
+            {
+                "fields": (
+                    "primary_key",
+                    "property_primary_key",
+                    "property_link",
+                    "phone_number",
+                )
+            },
+        ),
+        (
+            "Status",
+            {
+                "fields": (
+                    "status",
+                    "progress",
+                    "progress_bar",
+                    "stage",
+                    "stage_progress",
+                )
+            },
+        ),
+        ("Options", {"fields": ("trigger_analysis",)}),
+        ("Metadata", {"fields": ("updated_at",)}),
+    )
+
+    def progress_display(self, obj):
+        return f"{obj.progress * 100:.1f}%"
+
+    progress_display.short_description = "Progress"
+
+    def progress_bar(self, obj):
+        progress_percentage = int(obj.progress * 100)
+        color = "#4CAF50" if progress_percentage == 100 else "#2196F3"
+        return format_html(
+            '<div style="width: 100%; background-color: #f0f0f0; border-radius: 5px;">'
+            '<div style="height: 20px; width: {}%; background-color: {}; border-radius: 5px; text-align: center; color: white;">'
+            "{:.1f}%</div></div>",
+            progress_percentage,
+            color,
+            obj.progress * 100,
+        )
+
+    progress_bar.short_description = "Progress Bar"
+
+    def property_link(self, obj):
+        url = reverse(
+            "admin:backup_backupproperty_change", args=[obj.property_primary_key]
+        )
+        return format_html('<a href="{}">{}</a>', url, obj.property_primary_key)
+
+    property_link.short_description = "Property"
+
+
+class JobStatusFilter(SimpleListFilter):
+    title = "Job Status"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("PENDING", "Pending"),
+            ("IN_PROGRESS", "In Progress"),
+            ("COMPLETED", "Completed"),
+            ("FAILED", "Failed"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(status=self.value())
+        return queryset
+
+
+@admin.register(BackupScrapingJob)
+class BackupScrapingJobAdmin(admin.ModelAdmin):
+    list_display = (
+        "primary_key",
+        "source",
+        "status",
+        "property_link",
+        "task_link",
+        "updated_at",
+    )
+    list_filter = ("source", JobStatusFilter, "updated_at")
+    search_fields = (
+        "primary_key",
+        "url",
+        "phone_number",
+        "property_id",
+        "scraped_property_id",
+        "task_id",
+    )
+    readonly_fields = ("updated_at", "property_link", "task_link", "job_url")
+    fieldsets = (
+        (
+            "Job Information",
+            {"fields": ("primary_key", "url", "job_url", "source", "status")},
+        ),
+        ("Callback", {"fields": ("callback_url", "phone_number")}),
+        (
+            "Related Records",
+            {
+                "fields": (
+                    "property_id",
+                    "scraped_property_id",
+                    "property_link",
+                    "task_id",
+                    "task_link",
+                )
+            },
+        ),
+        ("Metadata", {"fields": ("updated_at",)}),
+    )
+
+    def job_url(self, obj):
+        if obj.url:
+            return format_html(
+                '<a href="{}" target="_blank">View Source URL</a>', obj.url
+            )
+        return "-"
+
+    job_url.short_description = "Source URL"
+
+    def property_link(self, obj):
+        if obj.property_id:
+            url = reverse("admin:backup_backupproperty_change", args=[obj.property_id])
+            return format_html('<a href="{}">{}</a>', url, obj.property_id)
+        return "-"
+
+    property_link.short_description = "Property"
+
+    def task_link(self, obj):
+        if obj.task_id:
+            url = reverse("admin:backup_backupanalysistask_change", args=[obj.task_id])
+            return format_html('<a href="{}">{}</a>', url, obj.task_id)
+        return "-"
+
+    task_link.short_description = "Analysis Task"
+
+
+@admin.register(BackupFloorPlanAnalysisResult)
+class BackupFloorPlanAnalysisResultAdmin(admin.ModelAdmin):
+    list_display = ("id", "message", "user_id", "property_id", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("user_id", "property_id")
+
+
+@admin.register(BackupFloorPlan)
+class BackupFloorPlanAdmin(admin.ModelAdmin):
+    list_display = ("id", "floorplan_id", "original_url", "analysis_result")
+    list_filter = ("analysis_result",)
+    search_fields = ("floorplan_id",)
+
+
+@admin.register(BackupAllFloorsData)
+class BackupAllFloorsDataAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "floor_plan",
+        "json_file_url",
+        "csv_url",
+        "total_area_csv_url",
+        "image_labelme_side_by_side_url",
+    )
+    search_fields = ("floor_plan__floorplan_id",)
+
+
+@admin.register(BackupPlanFloor)
+class BackupPlanFloorAdmin(admin.ModelAdmin):
+    list_display = ("id", "floor", "floor_plan", "label_me_url")
+    search_fields = ("floor_plan__floorplan_id", "floor")
+
+
+@admin.register(BackupCsvFloor)
+class BackupCsvFloorAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "floor_name",
+        "calculated_total_area_metric",
+        "calculated_total_area_imperial",
+        "all_floors_data",
+    )
+    list_filter = ("floor_name",)
+    search_fields = ("floor_name",)
+
+
+@admin.register(BackupCsvRoom)
+class BackupCsvRoomAdmin(admin.ModelAdmin):
+    list_display = ("id", "room_name", "floor", "room_id")
+    search_fields = ("room_name",)
+
+
+@admin.register(BackupCsvRoomPixelData)
+class BackupCsvRoomPixelDataAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "room",
+        "min_x_pixels",
+        "min_y_pixels",
+        "max_x_pixels",
+        "max_y_pixels",
+        "max_area_pixels",
+        "actual_area_pixels",
+        "pixel_ratio",
+    )
+    search_fields = ("room__room_name",)
+
+
+@admin.register(BackupCsvRoomDimensions)
+class BackupCsvRoomDimensionsAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "room",
+        "dimensions_imperial",
+        "dimensions_metric",
+        "max_area_metric",
+        "max_area_imperial",
+    )
+    search_fields = ("room__room_name",)
+
+
+@admin.register(BackupCsvRoomScalingFactors)
+class BackupCsvRoomScalingFactorsAdmin(admin.ModelAdmin):
+    list_display = ("id", "room", "scale_metric", "scale_imperial")
+    search_fields = ("room__room_name",)
+
+
+# backup/tests.py
+from django.test import TestCase
+
+# Create your tests here.
+
+
+# backup/urls.py
+from django.urls import path
+
+from backup import views
+
+urlpatterns = [
+    path("property/", views.BackupPropertyView.as_view(), name="property"),
+    path(
+        "analysis-task/", views.BackupAnalysisTaskView.as_view(), name="analysis-task"
+    ),
+    path("scraping-job/", views.BackupScrapingJobView.as_view(), name="scraping-job"),
+    path("floorplan/", views.CompleteBackupFloorPlanView.as_view(), name="floorplan"),
+]
+
+
+# backup/views.py
+# backup_service/backup/views.py
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from backup.models import BackupAnalysisTask, BackupProperty, BackupScrapingJob
+from backup.serializers import (
+    BackupAnalysisTaskSerializer,
+    BackupPropertySerializer,
+    BackupScrapingJobSerializer,
+    CompleteBackupFloorPlanSerializer,
+)
+
+
+class BackupPropertyView(APIView):
+    """
+    API endpoint to create, update, and list backup properties.
+    """
+
+    def post(self, request, *args, **kwargs):
+        primary_key = request.data.get("primary_key")
+
+        try:
+            # If it already exists, we do an update
+            backup_property = BackupProperty.objects.get(primary_key=primary_key)
+            serializer = BackupPropertySerializer(
+                backup_property, data=request.data, partial=True
+            )
+        except BackupProperty.DoesNotExist:
+            # Otherwise create a new one
+            serializer = BackupPropertySerializer(data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request, *args, **kwargs):
+        # Return all backup properties (or filter as needed)
+        properties = BackupProperty.objects.all()
+        serializer = BackupPropertySerializer(properties, many=True)
+        return Response(serializer.data)
+
+
+class BackupAnalysisTaskView(APIView):
+    """
+    API endpoint to create and list backup analysis tasks.
+    """
+
+    def post(self, request, *args, **kwargs):
+        serializer = BackupAnalysisTaskSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request, *args, **kwargs):
+        tasks = BackupAnalysisTask.objects.all()
+        serializer = BackupAnalysisTaskSerializer(tasks, many=True)
+        return Response(serializer.data)
+
+
+class BackupScrapingJobView(APIView):
+    def post(self, request, *args, **kwargs):
+        serializer = BackupScrapingJobSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request, *args, **kwargs):
+        jobs = BackupScrapingJob.objects.all()
+        serializer = BackupScrapingJobSerializer(jobs, many=True)
+        return Response(serializer.data)
+
+
+class CompleteBackupFloorPlanView(APIView):
+    """
+    API endpoint to receive and store the complete backup of floorplan data.
+    """
+
+    def post(self, request, *args, **kwargs):
+        serializer = CompleteBackupFloorPlanSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+

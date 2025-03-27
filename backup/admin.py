@@ -4,18 +4,18 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from backup.models import (
-    BackupAllFloorsData,
-    BackupAnalysisTask,
-    BackupCsvFloor,
-    BackupCsvRoom,
-    BackupCsvRoomDimensions,
-    BackupCsvRoomPixelData,
-    BackupCsvRoomScalingFactors,
-    BackupFloorPlan,
-    BackupFloorPlanAnalysisResult,
-    BackupPlanFloor,
-    BackupProperty,
-    BackupScrapingJob,
+    AllFloorsData,
+    AnalysisTask,
+    CsvFloor,
+    CsvRoom,
+    CsvRoomDimensions,
+    CsvRoomPixelData,
+    CsvRoomScalingFactors,
+    FloorPlan,
+    FloorPlanAnalysisResult,
+    PlanFloor,
+    Property,
+    ScrapingJob,
 )
 
 
@@ -59,8 +59,8 @@ class PropertyStatusFilter(SimpleListFilter):
         return queryset
 
 
-@admin.register(BackupProperty)
-class BackupPropertyAdmin(admin.ModelAdmin):
+@admin.register(Property)
+class PropertyAdmin(admin.ModelAdmin):
     list_display = (
         "primary_key",
         "address",
@@ -208,8 +208,8 @@ class TaskStatusFilter(SimpleListFilter):
         return queryset
 
 
-@admin.register(BackupAnalysisTask)
-class BackupAnalysisTaskAdmin(admin.ModelAdmin):
+@admin.register(AnalysisTask)
+class AnalysisTaskAdmin(admin.ModelAdmin):
     list_display = (
         "primary_key",
         "property_link",
@@ -296,8 +296,8 @@ class JobStatusFilter(SimpleListFilter):
         return queryset
 
 
-@admin.register(BackupScrapingJob)
-class BackupScrapingJobAdmin(admin.ModelAdmin):
+@admin.register(ScrapingJob)
+class ScrapingJobAdmin(admin.ModelAdmin):
     list_display = (
         "primary_key",
         "source",
@@ -363,22 +363,22 @@ class BackupScrapingJobAdmin(admin.ModelAdmin):
     task_link.short_description = "Analysis Task"
 
 
-@admin.register(BackupFloorPlanAnalysisResult)
-class BackupFloorPlanAnalysisResultAdmin(admin.ModelAdmin):
+@admin.register(FloorPlanAnalysisResult)
+class FloorPlanAnalysisResultAdmin(admin.ModelAdmin):
     list_display = ("id", "message", "user_id", "property_id", "created_at")
     list_filter = ("created_at",)
     search_fields = ("user_id", "property_id")
 
 
-@admin.register(BackupFloorPlan)
-class BackupFloorPlanAdmin(admin.ModelAdmin):
+@admin.register(FloorPlan)
+class FloorPlanAdmin(admin.ModelAdmin):
     list_display = ("id", "floorplan_id", "original_url", "analysis_result")
     list_filter = ("analysis_result",)
     search_fields = ("floorplan_id",)
 
 
-@admin.register(BackupAllFloorsData)
-class BackupAllFloorsDataAdmin(admin.ModelAdmin):
+@admin.register(AllFloorsData)
+class AllFloorsDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "floor_plan",
@@ -390,14 +390,14 @@ class BackupAllFloorsDataAdmin(admin.ModelAdmin):
     search_fields = ("floor_plan__floorplan_id",)
 
 
-@admin.register(BackupPlanFloor)
-class BackupPlanFloorAdmin(admin.ModelAdmin):
+@admin.register(PlanFloor)
+class PlanFloorAdmin(admin.ModelAdmin):
     list_display = ("id", "floor", "floor_plan", "label_me_url")
     search_fields = ("floor_plan__floorplan_id", "floor")
 
 
-@admin.register(BackupCsvFloor)
-class BackupCsvFloorAdmin(admin.ModelAdmin):
+@admin.register(CsvFloor)
+class CsvFloorAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "floor_name",
@@ -409,17 +409,17 @@ class BackupCsvFloorAdmin(admin.ModelAdmin):
     search_fields = ("floor_name",)
 
 
-@admin.register(BackupCsvRoom)
-class BackupCsvRoomAdmin(admin.ModelAdmin):
-    list_display = ("id", "room_name", "floor", "room_id")
+@admin.register(CsvRoom)
+class CsvRoomAdmin(admin.ModelAdmin):
+    list_display = ("id", "room_name", "csv_floor", "room_id")
     search_fields = ("room_name",)
 
 
-@admin.register(BackupCsvRoomPixelData)
-class BackupCsvRoomPixelDataAdmin(admin.ModelAdmin):
+@admin.register(CsvRoomPixelData)
+class CsvRoomPixelDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "room",
+        "csv_room",
         "min_x_pixels",
         "min_y_pixels",
         "max_x_pixels",
@@ -431,11 +431,11 @@ class BackupCsvRoomPixelDataAdmin(admin.ModelAdmin):
     search_fields = ("room__room_name",)
 
 
-@admin.register(BackupCsvRoomDimensions)
-class BackupCsvRoomDimensionsAdmin(admin.ModelAdmin):
+@admin.register(CsvRoomDimensions)
+class CsvRoomDimensionsAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "room",
+        "csv_room",
         "dimensions_imperial",
         "dimensions_metric",
         "max_area_metric",
@@ -444,7 +444,7 @@ class BackupCsvRoomDimensionsAdmin(admin.ModelAdmin):
     search_fields = ("room__room_name",)
 
 
-@admin.register(BackupCsvRoomScalingFactors)
-class BackupCsvRoomScalingFactorsAdmin(admin.ModelAdmin):
-    list_display = ("id", "room", "scale_metric", "scale_imperial")
+@admin.register(CsvRoomScalingFactors)
+class CsvRoomScalingFactorsAdmin(admin.ModelAdmin):
+    list_display = ("id", "csv_room", "scale_metric", "scale_imperial")
     search_fields = ("room__room_name",)
