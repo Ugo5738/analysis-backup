@@ -6,7 +6,7 @@ services:
     image: pabackup
     command: >
       sh -c " 
-        python manage.py makemigrations &&
+        # python manage.py makemigrations &&
         # python manage.py migrate &&  
         # python manage.py populate_db &&
         daphne pabackup_service.asgi:application -b 0.0.0.0 -p 8000
