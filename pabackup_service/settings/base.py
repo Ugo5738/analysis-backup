@@ -32,6 +32,7 @@ THIRD_PARTY_APPS = [
     "django_rest_passwordreset",
     "drf_yasg",
     "drf_spectacular",
+    "simple_history",
     "storages",
     "django.contrib.sites",
     "rest_framework",
@@ -62,6 +63,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",  # Custom added
+    "simple_history.middleware.HistoryRequestMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",

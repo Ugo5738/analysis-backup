@@ -4,6 +4,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from backup.models import (
+    AllFloorsCsvRawRow,
     AllFloorsData,
     AnalysisTask,
     CsvFloor,
@@ -16,6 +17,7 @@ from backup.models import (
     PlanFloor,
     Property,
     ScrapingJob,
+    TotalAreaData,
 )
 
 
@@ -448,3 +450,80 @@ class CsvRoomDimensionsAdmin(admin.ModelAdmin):
 class CsvRoomScalingFactorsAdmin(admin.ModelAdmin):
     list_display = ("id", "csv_room", "scale_metric", "scale_imperial")
     search_fields = ("room__room_name",)
+
+
+@admin.register(AllFloorsCsvRawRow)
+class AllFloorsCsvRawRowAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "all_floors_data_link",
+        "floor_name",
+        "room_name",
+        "room_id",
+        "is_segment",
+        "created_at",
+    )
+    list_filter = ("floor_name", "is_segment", "created_at", "updated_at")
+    search_fields = (
+        "floor_name",
+        "room_name",
+        "room_id",
+        "all_floors_data__floor_plan__floorplan_id",
+    )
+    # Make fields read-only as it's backup data
+    readonly_fields = [
+        f.name for f in AllFloorsCsvRawRow._meta.get_fields() if f.name != "id"
+    ]
+    list_select_related = ("all_floors_data__floor_plan",)  # Optimize query
+    list_per_page = 100  # Show more per page
+
+    def all_floors_data_link(self, obj):
+        if obj.all_floors_data:
+            url = reverse(
+                "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+            )
+            # Display floorplan ID for context
+            fp_id = obj.all_floors_data.floor_plan.floorplan_id
+            return format_html(
+                '<a href="{}">AFD ID: {} (FP: {})</a>',
+                url,
+                obj.all_floors_data.id,
+                fp_id,
+            )
+        return "-"
+
+    all_floors_data_link.short_description = "All Floors Data"
+
+
+@admin.register(TotalAreaData)
+class TotalAreaDataAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "all_floors_data_link",
+        "area_name",
+        "square_meters",
+        "square_feet",
+        "total_floors",
+        "created_at",
+    )
+    list_filter = ("created_at", "updated_at")
+    search_fields = ("area_name", "all_floors_data__floor_plan__floorplan_id")
+    readonly_fields = ("created_at", "updated_at", "all_floors_data_link")
+    list_select_related = ("all_floors_data__floor_plan",)
+
+    def all_floors_data_link(self, obj):  # DRY violation
+        if obj.all_floors_data:
+            url = reverse(
+                "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+            )
+            # Display floorplan ID for context
+            fp_id = obj.all_floors_data.floor_plan.floorplan_id
+            return format_html(
+                '<a href="{}">AFD ID: {} (FP: {})</a>',
+                url,
+                obj.all_floors_data.id,
+                fp_id,
+            )
+        return "-"
+
+    all_floors_data_link.short_description = "All Floors Data"

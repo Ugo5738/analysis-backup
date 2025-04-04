@@ -1,14 +1,13 @@
-# backup_service/backup/views.py
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from backup.models import AnalysisTask, Property, ScrapingJob
 from backup.serializers import (
-    BackupAnalysisTaskSerializer,
-    BackupPropertySerializer,
-    BackupScrapingJobSerializer,
+    AnalysisTaskSerializer,
     CompleteBackupFloorPlanSerializer,
+    PropertySerializer,
+    ScrapingJobSerializer,
 )
 
 
@@ -23,12 +22,12 @@ class BackupPropertyView(APIView):
         try:
             # If it already exists, we do an update
             backup_property = Property.objects.get(primary_key=primary_key)
-            serializer = BackupPropertySerializer(
+            serializer = PropertySerializer(
                 backup_property, data=request.data, partial=True
             )
         except Property.DoesNotExist:
             # Otherwise create a new one
-            serializer = BackupPropertySerializer(data=request.data)
+            serializer = PropertySerializer(data=request.data)
 
         if serializer.is_valid():
             serializer.save()
@@ -39,7 +38,7 @@ class BackupPropertyView(APIView):
     def get(self, request, *args, **kwargs):
         # Return all backup properties (or filter as needed)
         properties = Property.objects.all()
-        serializer = BackupPropertySerializer(properties, many=True)
+        serializer = PropertySerializer(properties, many=True)
         return Response(serializer.data)
 
 
@@ -49,7 +48,7 @@ class BackupAnalysisTaskView(APIView):
     """
 
     def post(self, request, *args, **kwargs):
-        serializer = BackupAnalysisTaskSerializer(data=request.data)
+        serializer = AnalysisTaskSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -57,13 +56,13 @@ class BackupAnalysisTaskView(APIView):
 
     def get(self, request, *args, **kwargs):
         tasks = AnalysisTask.objects.all()
-        serializer = BackupAnalysisTaskSerializer(tasks, many=True)
+        serializer = AnalysisTaskSerializer(tasks, many=True)
         return Response(serializer.data)
 
 
 class BackupScrapingJobView(APIView):
     def post(self, request, *args, **kwargs):
-        serializer = BackupScrapingJobSerializer(data=request.data)
+        serializer = ScrapingJobSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -71,7 +70,7 @@ class BackupScrapingJobView(APIView):
 
     def get(self, request, *args, **kwargs):
         jobs = ScrapingJob.objects.all()
-        serializer = BackupScrapingJobSerializer(jobs, many=True)
+        serializer = ScrapingJobSerializer(jobs, many=True)
         return Response(serializer.data)
 
 

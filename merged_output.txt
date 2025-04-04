@@ -229,65 +229,52 @@ class CsvRoomScalingFactors(TrackingModel):
 from rest_framework import serializers
 
 from backup.models import (
-    BackupAllFloorsData,
-    BackupAnalysisTask,
-    BackupCsvFloor,
-    BackupCsvRoom,
-    BackupCsvRoomDimensions,
-    BackupCsvRoomPixelData,
-    BackupCsvRoomScalingFactors,
-    BackupFloorPlan,
-    BackupFloorPlanAnalysisResult,
-    BackupPlanFloor,
-    BackupProperty,
-    BackupScrapingJob,
-    BackupUser,
+    AllFloorsData,
+    AnalysisTask,
+    CsvFloor,
+    CsvRoom,
+    CsvRoomDimensions,
+    CsvRoomPixelData,
+    CsvRoomScalingFactors,
+    FloorPlan,
+    FloorPlanAnalysisResult,
+    PlanFloor,
+    Property,
+    ScrapingJob,
 )
 
 # ––––––– Basic Serializers –––––––
 
 
-class BackupUserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = BackupUser
-        fields = ["id", "phone_number"]
-
-
-class BackupPropertySerializer(serializers.ModelSerializer):
+class PropertySerializer(serializers.ModelSerializer):
     phone_number = serializers.CharField(write_only=True)
-    user = BackupUserSerializer(read_only=True)
 
     class Meta:
-        model = BackupProperty
+        model = Property
         fields = "__all__"
         read_only_fields = ("updated_at",)
 
     def create(self, validated_data):
         phone = validated_data.pop("phone_number")
-        backup_user, created = BackupUser.objects.get_or_create(phone_number=phone)
-        validated_data["user"] = backup_user
-        return BackupProperty.objects.create(**validated_data)
+        return Property.objects.create(**validated_data)
 
 
-class BackupAnalysisTaskSerializer(serializers.ModelSerializer):
+class AnalysisTaskSerializer(serializers.ModelSerializer):
     phone_number = serializers.CharField(write_only=True)
-    user = BackupUserSerializer(read_only=True)
 
     class Meta:
-        model = BackupAnalysisTask
+        model = AnalysisTask
         fields = "__all__"
         read_only_fields = ("updated_at",)
 
     def create(self, validated_data):
         phone = validated_data.pop("phone_number")
-        backup_user, created = BackupUser.objects.get_or_create(phone_number=phone)
-        validated_data["user"] = backup_user
-        return BackupAnalysisTask.objects.create(**validated_data)
+        return AnalysisTask.objects.create(**validated_data)
 
 
-class BackupScrapingJobSerializer(serializers.ModelSerializer):
+class ScrapingJobSerializer(serializers.ModelSerializer):
     class Meta:
-        model = BackupScrapingJob
+        model = ScrapingJob
         fields = "__all__"
         read_only_fields = ("updated_at",)
 
@@ -295,64 +282,64 @@ class BackupScrapingJobSerializer(serializers.ModelSerializer):
 # ––––––– Nested CSV Data Serializers –––––––
 
 
-class BackupCsvRoomPixelDataSerializer(serializers.ModelSerializer):
+class CsvRoomPixelDataSerializer(serializers.ModelSerializer):
     # Mark 'room' as read-only so it isn’t required in the input.
-    room = serializers.PrimaryKeyRelatedField(read_only=True)
+    csv_room = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
-        model = BackupCsvRoomPixelData
+        model = CsvRoomPixelData
         fields = "__all__"
 
 
-class BackupCsvRoomDimensionsSerializer(serializers.ModelSerializer):
-    room = serializers.PrimaryKeyRelatedField(read_only=True)
+class CsvRoomDimensionsSerializer(serializers.ModelSerializer):
+    csv_room = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
-        model = BackupCsvRoomDimensions
+        model = CsvRoomDimensions
         fields = "__all__"
 
 
-class BackupCsvRoomScalingFactorsSerializer(serializers.ModelSerializer):
-    room = serializers.PrimaryKeyRelatedField(read_only=True)
+class CsvRoomScalingFactorsSerializer(serializers.ModelSerializer):
+    csv_room = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
-        model = BackupCsvRoomScalingFactors
+        model = CsvRoomScalingFactors
         fields = "__all__"
 
 
-class BackupCsvRoomSerializer(serializers.ModelSerializer):
+class CsvRoomSerializer(serializers.ModelSerializer):
     # 'floor' will be set automatically during creation.
-    floor = serializers.PrimaryKeyRelatedField(read_only=True)
-    backup_pixel_data = BackupCsvRoomPixelDataSerializer(required=False)
-    backup_dimensions = BackupCsvRoomDimensionsSerializer(required=False)
-    backup_scaling_factors = BackupCsvRoomScalingFactorsSerializer(required=False)
+    csv_floor = serializers.PrimaryKeyRelatedField(read_only=True)
+    backup_pixel_data = CsvRoomPixelDataSerializer(required=False)
+    backup_dimensions = CsvRoomDimensionsSerializer(required=False)
+    backup_scaling_factors = CsvRoomScalingFactorsSerializer(required=False)
 
     class Meta:
-        model = BackupCsvRoom
+        model = CsvRoom
         fields = "__all__"
 
 
-class BackupCsvFloorSerializer(serializers.ModelSerializer):
+class CsvFloorSerializer(serializers.ModelSerializer):
     # 'all_floors_data' is set by the parent so mark it as read-only.
     all_floors_data = serializers.PrimaryKeyRelatedField(read_only=True)
 
     # Use nested serializer for rooms.
-    backup_rooms = BackupCsvRoomSerializer(many=True, required=False)
+    backup_rooms = CsvRoomSerializer(many=True, required=False)
 
     class Meta:
-        model = BackupCsvFloor
+        model = CsvFloor
         fields = "__all__"
 
 
 # ––––––– Nested All Floors Data (including CSV floors/rooms) –––––––
 
 
-class BackupAllFloorsDataSerializer(serializers.ModelSerializer):
+class AllFloorsDataSerializer(serializers.ModelSerializer):
     # Use the nested serializer with many=True
-    backup_csv_floors = BackupCsvFloorSerializer(many=True, required=False)
+    backup_csv_floors = CsvFloorSerializer(many=True, required=False)
 
     class Meta:
-        model = BackupAllFloorsData
+        model = AllFloorsData
         fields = "__all__"
         extra_kwargs = {
             "floor_plan": {"read_only": True},
@@ -360,10 +347,10 @@ class BackupAllFloorsDataSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         csv_floors_data = validated_data.pop("backup_csv_floors", [])
-        all_floors_data = BackupAllFloorsData.objects.create(**validated_data)
+        all_floors_data = AllFloorsData.objects.create(**validated_data)
         for csv_floor_data in csv_floors_data:
             backup_rooms_data = csv_floor_data.pop("backup_rooms", [])
-            csv_floor = BackupCsvFloor.objects.create(
+            csv_floor = CsvFloor.objects.create(
                 all_floors_data=all_floors_data, **csv_floor_data
             )
             for room_data in backup_rooms_data:
@@ -371,51 +358,45 @@ class BackupAllFloorsDataSerializer(serializers.ModelSerializer):
                 backup_pixel_data = room_data.pop("backup_pixel_data", None)
                 backup_dimensions = room_data.pop("backup_dimensions", None)
                 backup_scaling_factors = room_data.pop("backup_scaling_factors", None)
-                room = BackupCsvRoom.objects.create(floor=csv_floor, **room_data)
+                room = CsvRoom.objects.create(csv_floor=csv_floor, **room_data)
                 if backup_pixel_data:
-                    BackupCsvRoomPixelData.objects.create(
-                        room=room, **backup_pixel_data
-                    )
+                    CsvRoomPixelData.objects.create(csv_room=room, **backup_pixel_data)
                 if backup_dimensions:
-                    BackupCsvRoomDimensions.objects.create(
-                        room=room, **backup_dimensions
-                    )
+                    CsvRoomDimensions.objects.create(csv_room=room, **backup_dimensions)
                 if backup_scaling_factors:
-                    BackupCsvRoomScalingFactors.objects.create(
-                        room=room, **backup_scaling_factors
+                    CsvRoomScalingFactors.objects.create(
+                        csv_room=room, **backup_scaling_factors
                     )
         return all_floors_data
 
 
 # ––––––– Analysis Result and FloorPlan Serializers –––––––
-class BackupFloorPlanAnalysisResultSerializer(serializers.ModelSerializer):
+class FloorPlanAnalysisResultSerializer(serializers.ModelSerializer):
     class Meta:
-        model = BackupFloorPlanAnalysisResult
+        model = FloorPlanAnalysisResult
         fields = "__all__"
 
 
-class BackupFloorPlanSerializer(serializers.ModelSerializer):
-    analysis_result = BackupFloorPlanAnalysisResultSerializer()
+class FloorPlanSerializer(serializers.ModelSerializer):
+    analysis_result = FloorPlanAnalysisResultSerializer()
 
     class Meta:
-        model = BackupFloorPlan
+        model = FloorPlan
         fields = "__all__"
 
     def create(self, validated_data):
         analysis_result_data = validated_data.pop("analysis_result")
-        analysis_result = BackupFloorPlanAnalysisResult.objects.create(
-            **analysis_result_data
-        )
-        backup_floorplan = BackupFloorPlan.objects.create(
+        analysis_result = FloorPlanAnalysisResult.objects.create(**analysis_result_data)
+        backup_floorplan = FloorPlan.objects.create(
             analysis_result=analysis_result, **validated_data
         )
         return backup_floorplan
 
 
 # ––––––– Plan Floor Serializer –––––––
-class BackupPlanFloorSerializer(serializers.ModelSerializer):
+class PlanFloorSerializer(serializers.ModelSerializer):
     class Meta:
-        model = BackupPlanFloor
+        model = PlanFloor
         fields = "__all__"
         extra_kwargs = {
             "floor_plan": {"read_only": True},  # Mark floor_plan as read-only
@@ -424,12 +405,12 @@ class BackupPlanFloorSerializer(serializers.ModelSerializer):
 
 # ––––––– Complete FloorPlan Backup Serializer –––––––
 class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
-    analysis_result = BackupFloorPlanAnalysisResultSerializer()
-    backup_all_floors_data = BackupAllFloorsDataSerializer(required=False)
-    backup_plan_floors = BackupPlanFloorSerializer(many=True, required=False)
+    analysis_result = FloorPlanAnalysisResultSerializer()
+    backup_all_floors_data = AllFloorsDataSerializer(required=False)
+    backup_plan_floors = PlanFloorSerializer(many=True, required=False)
 
     class Meta:
-        model = BackupFloorPlan
+        model = FloorPlan
         fields = "__all__"
 
     def create(self, validated_data):
@@ -438,25 +419,21 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
         backup_plan_floors_data = validated_data.pop("backup_plan_floors", [])
 
         # Create the analysis result and backup floorplan
-        analysis_result = BackupFloorPlanAnalysisResult.objects.create(
-            **analysis_result_data
-        )
-        backup_floorplan = BackupFloorPlan.objects.create(
+        analysis_result = FloorPlanAnalysisResult.objects.create(**analysis_result_data)
+        backup_floorplan = FloorPlan.objects.create(
             analysis_result=analysis_result, **validated_data
         )
 
         # Create the all floors data with nested CSV floors/rooms if provided.
         if backup_all_floors_data_data:
             # Pass the backup_floorplan explicitly as floor_plan
-            serializer = BackupAllFloorsDataSerializer(data=backup_all_floors_data_data)
+            serializer = AllFloorsDataSerializer(data=backup_all_floors_data_data)
             serializer.is_valid(raise_exception=True)
             serializer.save(floor_plan=backup_floorplan)
 
         # Create plan floors, explicitly assigning the floor_plan
         for plan_floor_data in backup_plan_floors_data:
-            BackupPlanFloor.objects.create(
-                floor_plan=backup_floorplan, **plan_floor_data
-            )
+            PlanFloor.objects.create(floor_plan=backup_floorplan, **plan_floor_data)
 
         return backup_floorplan
 
@@ -480,18 +457,18 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from backup.models import (
-    BackupAllFloorsData,
-    BackupAnalysisTask,
-    BackupCsvFloor,
-    BackupCsvRoom,
-    BackupCsvRoomDimensions,
-    BackupCsvRoomPixelData,
-    BackupCsvRoomScalingFactors,
-    BackupFloorPlan,
-    BackupFloorPlanAnalysisResult,
-    BackupPlanFloor,
-    BackupProperty,
-    BackupScrapingJob,
+    AllFloorsData,
+    AnalysisTask,
+    CsvFloor,
+    CsvRoom,
+    CsvRoomDimensions,
+    CsvRoomPixelData,
+    CsvRoomScalingFactors,
+    FloorPlan,
+    FloorPlanAnalysisResult,
+    PlanFloor,
+    Property,
+    ScrapingJob,
 )
 
 
@@ -535,8 +512,8 @@ class PropertyStatusFilter(SimpleListFilter):
         return queryset
 
 
-@admin.register(BackupProperty)
-class BackupPropertyAdmin(admin.ModelAdmin):
+@admin.register(Property)
+class PropertyAdmin(admin.ModelAdmin):
     list_display = (
         "primary_key",
         "address",
@@ -684,8 +661,8 @@ class TaskStatusFilter(SimpleListFilter):
         return queryset
 
 
-@admin.register(BackupAnalysisTask)
-class BackupAnalysisTaskAdmin(admin.ModelAdmin):
+@admin.register(AnalysisTask)
+class AnalysisTaskAdmin(admin.ModelAdmin):
     list_display = (
         "primary_key",
         "property_link",
@@ -772,8 +749,8 @@ class JobStatusFilter(SimpleListFilter):
         return queryset
 
 
-@admin.register(BackupScrapingJob)
-class BackupScrapingJobAdmin(admin.ModelAdmin):
+@admin.register(ScrapingJob)
+class ScrapingJobAdmin(admin.ModelAdmin):
     list_display = (
         "primary_key",
         "source",
@@ -839,22 +816,22 @@ class BackupScrapingJobAdmin(admin.ModelAdmin):
     task_link.short_description = "Analysis Task"
 
 
-@admin.register(BackupFloorPlanAnalysisResult)
-class BackupFloorPlanAnalysisResultAdmin(admin.ModelAdmin):
+@admin.register(FloorPlanAnalysisResult)
+class FloorPlanAnalysisResultAdmin(admin.ModelAdmin):
     list_display = ("id", "message", "user_id", "property_id", "created_at")
     list_filter = ("created_at",)
     search_fields = ("user_id", "property_id")
 
 
-@admin.register(BackupFloorPlan)
-class BackupFloorPlanAdmin(admin.ModelAdmin):
+@admin.register(FloorPlan)
+class FloorPlanAdmin(admin.ModelAdmin):
     list_display = ("id", "floorplan_id", "original_url", "analysis_result")
     list_filter = ("analysis_result",)
     search_fields = ("floorplan_id",)
 
 
-@admin.register(BackupAllFloorsData)
-class BackupAllFloorsDataAdmin(admin.ModelAdmin):
+@admin.register(AllFloorsData)
+class AllFloorsDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "floor_plan",
@@ -866,14 +843,14 @@ class BackupAllFloorsDataAdmin(admin.ModelAdmin):
     search_fields = ("floor_plan__floorplan_id",)
 
 
-@admin.register(BackupPlanFloor)
-class BackupPlanFloorAdmin(admin.ModelAdmin):
+@admin.register(PlanFloor)
+class PlanFloorAdmin(admin.ModelAdmin):
     list_display = ("id", "floor", "floor_plan", "label_me_url")
     search_fields = ("floor_plan__floorplan_id", "floor")
 
 
-@admin.register(BackupCsvFloor)
-class BackupCsvFloorAdmin(admin.ModelAdmin):
+@admin.register(CsvFloor)
+class CsvFloorAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "floor_name",
@@ -885,17 +862,17 @@ class BackupCsvFloorAdmin(admin.ModelAdmin):
     search_fields = ("floor_name",)
 
 
-@admin.register(BackupCsvRoom)
-class BackupCsvRoomAdmin(admin.ModelAdmin):
-    list_display = ("id", "room_name", "floor", "room_id")
+@admin.register(CsvRoom)
+class CsvRoomAdmin(admin.ModelAdmin):
+    list_display = ("id", "room_name", "csv_floor", "room_id")
     search_fields = ("room_name",)
 
 
-@admin.register(BackupCsvRoomPixelData)
-class BackupCsvRoomPixelDataAdmin(admin.ModelAdmin):
+@admin.register(CsvRoomPixelData)
+class CsvRoomPixelDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "room",
+        "csv_room",
         "min_x_pixels",
         "min_y_pixels",
         "max_x_pixels",
@@ -907,11 +884,11 @@ class BackupCsvRoomPixelDataAdmin(admin.ModelAdmin):
     search_fields = ("room__room_name",)
 
 
-@admin.register(BackupCsvRoomDimensions)
-class BackupCsvRoomDimensionsAdmin(admin.ModelAdmin):
+@admin.register(CsvRoomDimensions)
+class CsvRoomDimensionsAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "room",
+        "csv_room",
         "dimensions_imperial",
         "dimensions_metric",
         "max_area_metric",
@@ -920,10 +897,14 @@ class BackupCsvRoomDimensionsAdmin(admin.ModelAdmin):
     search_fields = ("room__room_name",)
 
 
-@admin.register(BackupCsvRoomScalingFactors)
-class BackupCsvRoomScalingFactorsAdmin(admin.ModelAdmin):
-    list_display = ("id", "room", "scale_metric", "scale_imperial")
+@admin.register(CsvRoomScalingFactors)
+class CsvRoomScalingFactorsAdmin(admin.ModelAdmin):
+    list_display = ("id", "csv_room", "scale_metric", "scale_imperial")
     search_fields = ("room__room_name",)
+
+
+# backup/schema.png
+// Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
 
 
 # backup/tests.py
@@ -948,17 +929,16 @@ urlpatterns = [
 
 
 # backup/views.py
-# backup_service/backup/views.py
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from backup.models import BackupAnalysisTask, BackupProperty, BackupScrapingJob
+from backup.models import AnalysisTask, Property, ScrapingJob
 from backup.serializers import (
-    BackupAnalysisTaskSerializer,
-    BackupPropertySerializer,
-    BackupScrapingJobSerializer,
+    AnalysisTaskSerializer,
     CompleteBackupFloorPlanSerializer,
+    PropertySerializer,
+    ScrapingJobSerializer,
 )
 
 
@@ -972,13 +952,13 @@ class BackupPropertyView(APIView):
 
         try:
             # If it already exists, we do an update
-            backup_property = BackupProperty.objects.get(primary_key=primary_key)
-            serializer = BackupPropertySerializer(
+            backup_property = Property.objects.get(primary_key=primary_key)
+            serializer = PropertySerializer(
                 backup_property, data=request.data, partial=True
             )
-        except BackupProperty.DoesNotExist:
+        except Property.DoesNotExist:
             # Otherwise create a new one
-            serializer = BackupPropertySerializer(data=request.data)
+            serializer = PropertySerializer(data=request.data)
 
         if serializer.is_valid():
             serializer.save()
@@ -988,8 +968,8 @@ class BackupPropertyView(APIView):
 
     def get(self, request, *args, **kwargs):
         # Return all backup properties (or filter as needed)
-        properties = BackupProperty.objects.all()
-        serializer = BackupPropertySerializer(properties, many=True)
+        properties = Property.objects.all()
+        serializer = PropertySerializer(properties, many=True)
         return Response(serializer.data)
 
 
@@ -999,29 +979,29 @@ class BackupAnalysisTaskView(APIView):
     """
 
     def post(self, request, *args, **kwargs):
-        serializer = BackupAnalysisTaskSerializer(data=request.data)
+        serializer = AnalysisTaskSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, *args, **kwargs):
-        tasks = BackupAnalysisTask.objects.all()
-        serializer = BackupAnalysisTaskSerializer(tasks, many=True)
+        tasks = AnalysisTask.objects.all()
+        serializer = AnalysisTaskSerializer(tasks, many=True)
         return Response(serializer.data)
 
 
 class BackupScrapingJobView(APIView):
     def post(self, request, *args, **kwargs):
-        serializer = BackupScrapingJobSerializer(data=request.data)
+        serializer = ScrapingJobSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, *args, **kwargs):
-        jobs = BackupScrapingJob.objects.all()
-        serializer = BackupScrapingJobSerializer(jobs, many=True)
+        jobs = ScrapingJob.objects.all()
+        serializer = ScrapingJobSerializer(jobs, many=True)
         return Response(serializer.data)
 
 

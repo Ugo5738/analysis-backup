@@ -1,4 +1,5 @@
 from django.db import models
+from simple_history.models import HistoricalRecords
 
 from helpers.models import TrackingModel
 
@@ -38,6 +39,8 @@ class Property(models.Model):
         max_length=20, choices=ANALYSIS_SOURCE, default="original"
     )
 
+    history = HistoricalRecords()
+
     def __str__(self):
         return f"Property {self.primary_key} - {self.address or 'No Address'}"
 
@@ -54,6 +57,8 @@ class AnalysisTask(models.Model):
     stage_progress = models.JSONField(default=dict)
     trigger_analysis = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    history = HistoricalRecords()
 
     def __str__(self):
         return (
@@ -84,6 +89,8 @@ class FloorPlanAnalysisResult(TrackingModel):
     property_id = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    history = HistoricalRecords()
+
     def __str__(self):
         return f"{self.user_id} - {self.property_id}"
 
@@ -97,6 +104,8 @@ class FloorPlan(TrackingModel):
     )
     floorplan_id = models.CharField(max_length=255)
     original_url = models.URLField()
+
+    history = HistoricalRecords()
 
     def __str__(self):
         return self.floorplan_id
@@ -112,6 +121,8 @@ class AllFloorsData(TrackingModel):
     total_area_csv_url = models.URLField()
     image_labelme_side_by_side_url = models.URLField()
     notes = models.TextField(blank=True, null=True)
+
+    history = HistoricalRecords()
 
     def __str__(self):
         return f"Backup All Floors Data for {self.floor_plan.floorplan_id}"
@@ -130,6 +141,8 @@ class PlanFloor(TrackingModel):
     csv_url = models.URLField()
     image_side_by_side_url = models.URLField()
 
+    history = HistoricalRecords()
+
     def __str__(self):
         return f"{self.floor} - {self.floor_plan.floorplan_id}"
 
@@ -142,6 +155,8 @@ class CsvFloor(TrackingModel):  # AllFloorsCsvfloor
     floor_name = models.CharField(max_length=100, null=True, blank=True)
     calculated_total_area_metric = models.FloatField(null=True, blank=True)
     calculated_total_area_imperial = models.FloatField(null=True, blank=True)
+
+    history = HistoricalRecords()
 
     def __str__(self):
         return self.floor_name
@@ -159,6 +174,8 @@ class CsvRoom(TrackingModel):
     no_of_windows = models.FloatField(null=True, blank=True)
     no_of_room_points = models.FloatField(null=True, blank=True)
 
+    history = HistoricalRecords()
+
     def __str__(self):
         return f"{self.room_name} ({self.floor.floor_name})"
 
@@ -175,6 +192,8 @@ class CsvRoomPixelData(TrackingModel):
     max_area_pixels = models.FloatField(null=True, blank=True)
     actual_area_pixels = models.FloatField(null=True, blank=True)
     pixel_ratio = models.FloatField(null=True, blank=True)
+
+    history = HistoricalRecords()
 
     def __str__(self):
         return f"Backup Pixel Data for {self.room.room_name}"
@@ -194,6 +213,8 @@ class CsvRoomDimensions(TrackingModel):
     calculated_area_imperial = models.FloatField(null=True, blank=True)
     calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
 
+    history = HistoricalRecords()
+
     def __str__(self):
         return f"Backup Dimensions for {self.room.room_name}"
 
@@ -206,19 +227,102 @@ class CsvRoomScalingFactors(TrackingModel):
     scale_metric = models.FloatField(null=True, blank=True)
     scale_imperial = models.FloatField(null=True, blank=True)
 
+    history = HistoricalRecords()
+
     def __str__(self):
         return f"Backup Scaling Factors for {self.room.room_name}"
 
 
-# To scale, remove bottle necks. E.g naming
+# Mimic AllFloorsCsvRawRow model
+class AllFloorsCsvRawRow(TrackingModel):
+    """Stores a raw representation of a single row from all_floors.csv."""
 
-# AllFloorsData
-#      |
-# CsvFloor
-#      |
-# CsvRoom
-#      |
-# [CsvRoomPixelData + CsvRoomDimensions + CsvRoomScalingFactors]
+    all_floors_data = models.ForeignKey(
+        AllFloorsData,
+        on_delete=models.CASCADE,
+        related_name="backup_all_floors_raw_rows",
+    )
+    # Match fields from floorplan service's AllFloorsCsvRawRow model
+    floor_name = models.CharField(max_length=100, null=True, blank=True, db_index=True)
+    room_name = models.CharField(max_length=100, null=True, blank=True)
+    is_segment = models.CharField(max_length=50, null=True, blank=True)
+    dimensions_imperial = models.CharField(max_length=100, null=True, blank=True)
+    dimensions_metric = models.CharField(max_length=100, null=True, blank=True)
+    room_id = models.FloatField(null=True, blank=True, db_index=True)
+    no_of_door = models.FloatField(null=True, blank=True)
+    no_of_window = models.FloatField(null=True, blank=True)
+    no_of_room_points = models.FloatField(null=True, blank=True)
+    min_x_pixels = models.FloatField(null=True, blank=True)
+    min_y_pixels = models.FloatField(null=True, blank=True)
+    max_x_pixels = models.FloatField(null=True, blank=True)
+    max_y_pixels = models.FloatField(null=True, blank=True)
+    max_area_metric = models.FloatField(null=True, blank=True)
+    max_area_imperial = models.FloatField(null=True, blank=True)
+    max_area_pixels = models.FloatField(null=True, blank=True)
+    actual_area_pixels = models.FloatField(null=True, blank=True)
+    pixel_ratio = models.FloatField(null=True, blank=True)
+    scale_metric = models.FloatField(null=True, blank=True)
+    scale_imperial = models.FloatField(null=True, blank=True)
+    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
+    calculated_floor_total_sq_area_metric = models.FloatField(null=True, blank=True)
+    calculated_area_imperial = models.FloatField(null=True, blank=True)
+    calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
+    # Add other fields if they exist in the source model/CSV (e.g., the numbered columns)
 
-# future Ugo should be thanking past Ugo not being angry with past Ugo
-# is future Ugo going to be thankful that I am making this decision
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "Backup All Floors CSV Raw Row"
+        verbose_name_plural = "Backup All Floors CSV Raw Rows"
+        indexes = [
+            models.Index(fields=["all_floors_data", "floor_name"]),
+            models.Index(fields=["all_floors_data", "room_id"]),
+        ]
+
+    def __str__(self):
+        afd_id = self.all_floors_data_id if self.all_floors_data_id else "N/A"
+        return (
+            f"Raw Row for AFD:{afd_id} - Floor:{self.floor_name} RoomID:{self.room_id}"
+        )
+
+
+# Mimic TotalAreaData model
+class TotalAreaData(TrackingModel):
+    """Stores parsed data from the total_area.csv file (backup)."""
+
+    all_floors_data = models.ForeignKey(
+        AllFloorsData, related_name="backup_total_area_data", on_delete=models.CASCADE
+    )
+    area_name = models.CharField(max_length=500, null=True, blank=True)
+    square_meters = models.FloatField(null=True, blank=True)
+    square_feet = models.FloatField(null=True, blank=True)
+    total_floors = models.IntegerField(null=True, blank=True)
+    total_named_rooms = models.IntegerField(null=True, blank=True)
+    total_segments = models.IntegerField(null=True, blank=True)
+    total_points = models.IntegerField(null=True, blank=True)
+    total_objects = models.IntegerField(null=True, blank=True)
+    total_door_objects = models.IntegerField(null=True, blank=True)
+    total_window_objects = models.IntegerField(null=True, blank=True)
+    total_stair_objects = models.IntegerField(null=True, blank=True)
+    list_of_objects = models.TextField(null=True, blank=True)
+    total_actual_pixels = models.FloatField(null=True, blank=True)
+    metric_scale = models.FloatField(null=True, blank=True)
+    imperial_scale = models.FloatField(null=True, blank=True)
+    input_image_tokens = models.IntegerField(null=True, blank=True)
+    input_text_tokens = models.IntegerField(null=True, blank=True)
+    output_text_tokens = models.IntegerField(null=True, blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        unique_together = ("all_floors_data", "area_name")
+        verbose_name = "Backup Total Area Data"
+        verbose_name_plural = "Backup Total Area Data"
+
+    def __str__(self):
+        afd_id = (
+            self.all_floors_data.floor_plan.floorplan_id
+            if self.all_floors_data and self.all_floors_data.floor_plan
+            else "N/A"
+        )
+        return f"{self.area_name or 'Unnamed Area'} for FloorPlan: {afd_id}"

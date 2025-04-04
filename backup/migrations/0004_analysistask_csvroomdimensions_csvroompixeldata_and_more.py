@@ -16,6 +16,11 @@ class Migration(migrations.Migration):
             model_name="backupproperty",
             name="user",
         ),
+        # Remove the user field from BackupAnalysisTask
+        migrations.RemoveField(
+            model_name="backupanalysistask",
+            name="user",
+        ),
         # Rename fields on original model names before renaming models
         migrations.RenameField(
             model_name="backupcsvroomdimensions",
