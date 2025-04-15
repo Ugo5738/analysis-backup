@@ -41,6 +41,11 @@ class Property(models.Model):
 
     history = HistoricalRecords()
 
+    class Meta:
+        # db_table = "properties"
+        verbose_name = "Property Data"
+        verbose_name_plural = "Property Data Records"
+
     def __str__(self):
         return f"Property {self.primary_key} - {self.address or 'No Address'}"
 
@@ -60,6 +65,11 @@ class AnalysisTask(models.Model):
 
     history = HistoricalRecords()
 
+    class Meta:
+        # db_table = "analysis_tasks"
+        verbose_name = "Analysis Task"
+        verbose_name_plural = "Analysis Tasks"
+
     def __str__(self):
         return (
             f"Analysis Task {self.primary_key} for Property {self.property_primary_key}"
@@ -78,6 +88,12 @@ class ScrapingJob(models.Model):
     task_id = models.IntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        # db_table = "scraping_jobs"
+
+        verbose_name = "Scraping Job"
+        verbose_name_plural = "Scraping Jobs"
+
 
 # === Floorplan Models ===
 
@@ -87,12 +103,20 @@ class FloorPlanAnalysisResult(TrackingModel):
     message = models.CharField(max_length=255)
     user_id = models.CharField(max_length=255)
     property_id = models.CharField(max_length=255)
-    created_at = models.DateTimeField(auto_now_add=True)
 
     history = HistoricalRecords()
 
+    class Meta:
+        # db_table = "fp_analysis_results"
+        unique_together = ("user_id", "property_id")
+        indexes = [
+            models.Index(fields=["user_id", "property_id"]),
+        ]
+        verbose_name = "Floor Plan Analysis Result"
+        verbose_name_plural = "Floor Plan Analysis Results"
+
     def __str__(self):
-        return f"{self.user_id} - {self.property_id}"
+        return f"Analysis: {self.user_id} - {self.property_id} (ID: {self.id})"
 
 
 # Mimic FloorPlan model
@@ -107,8 +131,20 @@ class FloorPlan(TrackingModel):
 
     history = HistoricalRecords()
 
+    class Meta:
+        # db_table = "floorplans"
+        unique_together = ("analysis_result", "floorplan_id")
+        indexes = [
+            models.Index(
+                fields=["floorplan_id"]
+            ),  # Can keep this index too if needed for other lookups
+            # The unique_together constraint often implies an index anyway
+        ]
+        verbose_name = "Floor Plan"
+        verbose_name_plural = "Floor Plans"
+
     def __str__(self):
-        return self.floorplan_id
+        return f"FloorPlan: {self.floorplan_id} (AnalysisID: {self.analysis_result_id})"
 
 
 # Mimic AllFloorsData model
@@ -123,6 +159,10 @@ class AllFloorsData(TrackingModel):
     notes = models.TextField(blank=True, null=True)
 
     history = HistoricalRecords()
+
+    class Meta:
+        # db_table = "fp_all_floors_data"
+        pass
 
     def __str__(self):
         return f"Backup All Floors Data for {self.floor_plan.floorplan_id}"
@@ -143,6 +183,10 @@ class PlanFloor(TrackingModel):
 
     history = HistoricalRecords()
 
+    class Meta:
+        # db_table = "fp_plan_floors"
+        pass
+
     def __str__(self):
         return f"{self.floor} - {self.floor_plan.floorplan_id}"
 
@@ -157,6 +201,10 @@ class CsvFloor(TrackingModel):  # AllFloorsCsvfloor
     calculated_total_area_imperial = models.FloatField(null=True, blank=True)
 
     history = HistoricalRecords()
+
+    class Meta:
+        # db_table = "fp_csv_floors"
+        pass
 
     def __str__(self):
         return self.floor_name
@@ -176,6 +224,10 @@ class CsvRoom(TrackingModel):
 
     history = HistoricalRecords()
 
+    class Meta:
+        # db_table = "fp_csv_room_pixel_data"
+        pass
+
     def __str__(self):
         return f"{self.room_name} ({self.floor.floor_name})"
 
@@ -194,6 +246,10 @@ class CsvRoomPixelData(TrackingModel):
     pixel_ratio = models.FloatField(null=True, blank=True)
 
     history = HistoricalRecords()
+
+    class Meta:
+        # db_table = "fp_csv_room_dimensions"
+        pass
 
     def __str__(self):
         return f"Backup Pixel Data for {self.room.room_name}"
@@ -215,6 +271,10 @@ class CsvRoomDimensions(TrackingModel):
 
     history = HistoricalRecords()
 
+    class Meta:
+        # db_table = "fp_csv_room_dimensions"
+        pass
+
     def __str__(self):
         return f"Backup Dimensions for {self.room.room_name}"
 
@@ -228,6 +288,10 @@ class CsvRoomScalingFactors(TrackingModel):
     scale_imperial = models.FloatField(null=True, blank=True)
 
     history = HistoricalRecords()
+
+    class Meta:
+        # db_table = "fp_csv_room_scaling_factors"
+        pass
 
     def __str__(self):
         return f"Backup Scaling Factors for {self.room.room_name}"
@@ -272,8 +336,9 @@ class AllFloorsCsvRawRow(TrackingModel):
     history = HistoricalRecords()
 
     class Meta:
-        verbose_name = "Backup All Floors CSV Raw Row"
-        verbose_name_plural = "Backup All Floors CSV Raw Rows"
+        # db_table = "fp_all_floors_raw_rows"
+        verbose_name = "All Floors CSV Raw Row"
+        verbose_name_plural = "All Floors CSV Raw Rows"
         indexes = [
             models.Index(fields=["all_floors_data", "floor_name"]),
             models.Index(fields=["all_floors_data", "room_id"]),
@@ -315,9 +380,10 @@ class TotalAreaData(TrackingModel):
     history = HistoricalRecords()
 
     class Meta:
+        # db_table = "fp_total_area_data"
         unique_together = ("all_floors_data", "area_name")
-        verbose_name = "Backup Total Area Data"
-        verbose_name_plural = "Backup Total Area Data"
+        verbose_name = "Total Area Data"
+        verbose_name_plural = "Total Area Data"
 
     def __str__(self):
         afd_id = (

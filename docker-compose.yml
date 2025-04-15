@@ -6,8 +6,8 @@ services:
       dockerfile: Dockerfile
     command: >
       sh -c "
-        python manage.py makemigrations &&
-        python manage.py migrate &&
+        # python manage.py makemigrations &&
+        # python manage.py migrate &&
         daphne pabackup_service.asgi:application -b 0.0.0.0 -p 8000
       "
     volumes:
@@ -16,14 +16,14 @@ services:
       - "8000:8000"
     depends_on:
       - redis
-    networks:
-      - default
+    # networks:
+    #   - default
 
   redis:
     container_name: backup-app-redis
     image: redis:latest
-    networks:
-      - default
+    # networks:
+    #   - default
 
   celery:
     container_name: backup-app-celery
@@ -43,10 +43,10 @@ services:
       - .:/code
     depends_on:
       - redis
-    networks:
-      - default
+#     networks:
+#       - default
 
-networks:
-  default:
-    name: shared_network
-    external: true
+# networks:
+#   default:
+#     name: shared_network
+#     external: true

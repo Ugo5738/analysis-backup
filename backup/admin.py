@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.admin import SimpleListFilter
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html
 
 from backup.models import (
@@ -19,6 +19,8 @@ from backup.models import (
     ScrapingJob,
     TotalAreaData,
 )
+
+# --- Filters (No changes needed here) ---
 
 
 class AnalysisSourceFilter(SimpleListFilter):
@@ -59,6 +61,45 @@ class PropertyStatusFilter(SimpleListFilter):
         elif self.value() == "no_images":
             return queryset.filter(image_urls=[])
         return queryset
+
+
+class TaskStatusFilter(SimpleListFilter):
+    title = "Task Status"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("PENDING", "Pending"),
+            ("IN_PROGRESS", "In Progress"),
+            ("COMPLETED", "Completed"),
+            ("FAILED", "Failed"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(status=self.value())
+        return queryset
+
+
+class JobStatusFilter(SimpleListFilter):
+    title = "Job Status"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("PENDING", "Pending"),
+            ("IN_PROGRESS", "In Progress"),
+            ("COMPLETED", "Completed"),
+            ("FAILED", "Failed"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(status=self.value())
+        return queryset
+
+
+# --- ModelAdmins (Corrections applied below) ---
 
 
 @admin.register(Property)
@@ -179,35 +220,19 @@ class PropertyAdmin(admin.ModelAdmin):
         html = (
             '<div style="display: flex; flex-wrap: wrap; gap: 10px; max-width: 800px;">'
         )
+        image_count = len(obj.image_urls)
+        display_limit = 5
         for i, url in enumerate(obj.image_urls):
-            if i < 5:  # Show first 5 images only
-                html += f'<img src="{url}" style="width: 150px; height: auto; object-fit: cover;" />'
+            if i < display_limit:
+                html += f'<img src="{url}" style="width: 150px; height: auto; object-fit: cover; border: 1px solid #ccc;" alt="Property Image {i+1}" />'
 
-        if len(obj.image_urls) > 5:
-            html += f'<div style="width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; background-color: #f0f0f0;">+{len(obj.image_urls) - 5} more</div>'
+        if image_count > display_limit:
+            html += f'<div style="width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; background-color: #f0f0f0; border: 1px solid #ccc; font-size: 1.2em; color: #555;">+{image_count - display_limit} more</div>'
 
         html += "</div>"
         return format_html(html)
 
     image_preview.short_description = "Image Preview"
-
-
-class TaskStatusFilter(SimpleListFilter):
-    title = "Task Status"
-    parameter_name = "status"
-
-    def lookups(self, request, model_admin):
-        return [
-            ("PENDING", "Pending"),
-            ("IN_PROGRESS", "In Progress"),
-            ("COMPLETED", "Completed"),
-            ("FAILED", "Failed"),
-        ]
-
-    def queryset(self, request, queryset):
-        if self.value():
-            return queryset.filter(status=self.value())
-        return queryset
 
 
 @admin.register(AnalysisTask)
@@ -260,9 +285,13 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
     def progress_bar(self, obj):
         progress_percentage = int(obj.progress * 100)
         color = "#4CAF50" if progress_percentage == 100 else "#2196F3"
+        if obj.status == "FAILED":
+            color = "#f44336"  # Red for failed
+        elif obj.status == "PENDING":
+            color = "#ff9800"  # Orange for pending
         return format_html(
-            '<div style="width: 100%; background-color: #f0f0f0; border-radius: 5px;">'
-            '<div style="height: 20px; width: {}%; background-color: {}; border-radius: 5px; text-align: center; color: white;">'
+            '<div style="width: 100%; background-color: #e0e0e0; border-radius: 5px; overflow: hidden;">'
+            '<div style="height: 20px; width: {}%; background-color: {}; border-radius: 5px; text-align: center; color: white; line-height: 20px; font-size: 12px; font-weight: bold;">'
             "{:.1f}%</div></div>",
             progress_percentage,
             color,
@@ -272,30 +301,19 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
     progress_bar.short_description = "Progress Bar"
 
     def property_link(self, obj):
-        url = reverse(
-            "admin:backup_backupproperty_change", args=[obj.property_primary_key]
-        )
-        return format_html('<a href="{}">{}</a>', url, obj.property_primary_key)
+        if obj.property_primary_key:
+            try:
+                url = reverse(
+                    "admin:backup_property_change", args=[obj.property_primary_key]
+                )
+                return format_html('<a href="{}">{}</a>', url, obj.property_primary_key)
+            except NoReverseMatch:
+                # Handle cases where the property might not exist or the key is invalid
+                return f"{obj.property_primary_key} (Link Error)"
+        return "-"
 
     property_link.short_description = "Property"
-
-
-class JobStatusFilter(SimpleListFilter):
-    title = "Job Status"
-    parameter_name = "status"
-
-    def lookups(self, request, model_admin):
-        return [
-            ("PENDING", "Pending"),
-            ("IN_PROGRESS", "In Progress"),
-            ("COMPLETED", "Completed"),
-            ("FAILED", "Failed"),
-        ]
-
-    def queryset(self, request, queryset):
-        if self.value():
-            return queryset.filter(status=self.value())
-        return queryset
+    property_link.admin_order_field = "property_primary_key"
 
 
 @admin.register(ScrapingJob)
@@ -350,19 +368,27 @@ class ScrapingJobAdmin(admin.ModelAdmin):
 
     def property_link(self, obj):
         if obj.property_id:
-            url = reverse("admin:backup_backupproperty_change", args=[obj.property_id])
-            return format_html('<a href="{}">{}</a>', url, obj.property_id)
+            try:
+                url = reverse("admin:backup_property_change", args=[obj.property_id])
+                return format_html('<a href="{}">{}</a>', url, obj.property_id)
+            except NoReverseMatch:
+                return f"{obj.property_id} (Link Error)"
         return "-"
 
     property_link.short_description = "Property"
+    property_link.admin_order_field = "property_id"
 
     def task_link(self, obj):
         if obj.task_id:
-            url = reverse("admin:backup_backupanalysistask_change", args=[obj.task_id])
-            return format_html('<a href="{}">{}</a>', url, obj.task_id)
+            try:
+                url = reverse("admin:backup_analysistask_change", args=[obj.task_id])
+                return format_html('<a href="{}">{}</a>', url, obj.task_id)
+            except NoReverseMatch:
+                return f"{obj.task_id} (Link Error)"
         return "-"
 
     task_link.short_description = "Analysis Task"
+    task_link.admin_order_field = "task_id"
 
 
 @admin.register(FloorPlanAnalysisResult)
@@ -370,32 +396,131 @@ class FloorPlanAnalysisResultAdmin(admin.ModelAdmin):
     list_display = ("id", "message", "user_id", "property_id", "created_at")
     list_filter = ("created_at",)
     search_fields = ("user_id", "property_id")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(FloorPlan)
 class FloorPlanAdmin(admin.ModelAdmin):
-    list_display = ("id", "floorplan_id", "original_url", "analysis_result")
+    list_display = ("id", "floorplan_id", "original_url_link", "analysis_result")
     list_filter = ("analysis_result",)
     search_fields = ("floorplan_id",)
+    readonly_fields = ("created_at", "updated_at", "original_url_link")
+    list_select_related = ("analysis_result",)
+
+    def original_url_link(self, obj):
+        if obj.original_url:
+            return format_html(
+                '<a href="{0}" target="_blank">{0}</a>', obj.original_url
+            )
+        return "-"
+
+    original_url_link.short_description = "Original URL"
 
 
 @admin.register(AllFloorsData)
 class AllFloorsDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "floor_plan",
-        "json_file_url",
-        "csv_url",
-        "total_area_csv_url",
-        "image_labelme_side_by_side_url",
+        "floor_plan_link",  # Changed for clarity
+        "json_file_url_link",
+        "csv_url_link",
+        "total_area_csv_url_link",
+        "image_labelme_side_by_side_url_link",
     )
     search_fields = ("floor_plan__floorplan_id",)
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "floor_plan_link",
+        "json_file_url_link",
+        "csv_url_link",
+        "total_area_csv_url_link",
+        "image_labelme_side_by_side_url_link",
+    )
+    list_select_related = ("floor_plan",)
+
+    def floor_plan_link(self, obj):
+        if obj.floor_plan:
+            url = reverse("admin:backup_floorplan_change", args=[obj.floor_plan.id])
+            return format_html(
+                '<a href="{}">{} (ID: {})</a>',
+                url,
+                obj.floor_plan.floorplan_id,
+                obj.floor_plan.id,
+            )
+        return "-"
+
+    floor_plan_link.short_description = "Floor Plan"
+
+    # Helper for creating links for URL fields
+    def _make_link(self, url, text="View"):
+        if url:
+            return format_html(
+                '<a href="{0}" target="_blank">{1}</a>',
+                url,
+                text if text != "View" else url,
+            )
+        return "-"
+
+    def json_file_url_link(self, obj):
+        return self._make_link(obj.json_file_url)
+
+    json_file_url_link.short_description = "JSON URL"
+
+    def csv_url_link(self, obj):
+        return self._make_link(obj.csv_url)
+
+    csv_url_link.short_description = "CSV URL"
+
+    def total_area_csv_url_link(self, obj):
+        return self._make_link(obj.total_area_csv_url)
+
+    total_area_csv_url_link.short_description = "Total Area CSV URL"
+
+    def image_labelme_side_by_side_url_link(self, obj):
+        return self._make_link(obj.image_labelme_side_by_side_url)
+
+    image_labelme_side_by_side_url_link.short_description = "Side-by-Side Image URL"
 
 
 @admin.register(PlanFloor)
 class PlanFloorAdmin(admin.ModelAdmin):
-    list_display = ("id", "floor", "floor_plan", "label_me_url")
+    list_display = (
+        "id",
+        "floor",
+        "floor_plan_link",
+        "label_me_url_link",
+    )  # Adjusted field names
     search_fields = ("floor_plan__floorplan_id", "floor")
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "floor_plan_link",
+        "label_me_url_link",
+    )
+    list_select_related = ("floor_plan",)
+
+    def floor_plan_link(self, obj):
+        if obj.floor_plan:
+            url = reverse("admin:backup_floorplan_change", args=[obj.floor_plan.id])
+            return format_html(
+                '<a href="{}">{} (ID: {})</a>',
+                url,
+                obj.floor_plan.floorplan_id,
+                obj.floor_plan.id,
+            )
+        return "-"
+
+    floor_plan_link.short_description = "Floor Plan"
+
+    def label_me_url_link(self, obj):
+        if obj.label_me_url:
+            return format_html(
+                '<a href="{0}" target="_blank">{0}</a>', obj.label_me_url
+            )
+        return "-"
+
+    label_me_url_link.short_description = "LabelMe URL"
 
 
 @admin.register(CsvFloor)
@@ -405,23 +530,72 @@ class CsvFloorAdmin(admin.ModelAdmin):
         "floor_name",
         "calculated_total_area_metric",
         "calculated_total_area_imperial",
-        "all_floors_data",
+        "all_floors_data_link",  # Renamed for consistency
     )
     list_filter = ("floor_name",)
-    search_fields = ("floor_name",)
+    search_fields = (
+        "floor_name",
+        "all_floors_data__floor_plan__floorplan_id",
+    )  # Added related search
+    readonly_fields = ("created_at", "updated_at", "all_floors_data_link")
+    list_select_related = ("all_floors_data__floor_plan",)  # Optimize query
+
+    def all_floors_data_link(self, obj):
+        if obj.all_floors_data:
+            url = reverse(
+                "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+            )
+            fp_id = (
+                obj.all_floors_data.floor_plan.floorplan_id
+                if obj.all_floors_data.floor_plan
+                else "N/A"
+            )
+            return format_html(
+                '<a href="{}">AFD ID: {} (FP: {})</a>',
+                url,
+                obj.all_floors_data.id,
+                fp_id,
+            )
+        return "-"
+
+    all_floors_data_link.short_description = "All Floors Data"
 
 
 @admin.register(CsvRoom)
 class CsvRoomAdmin(admin.ModelAdmin):
-    list_display = ("id", "room_name", "csv_floor", "room_id")
-    search_fields = ("room_name",)
+    list_display = (
+        "id",
+        "room_name",
+        "csv_floor_link",
+        "room_id",
+    )  # Renamed for consistency
+    search_fields = (
+        "room_name",
+        "csv_floor__floor_name",
+        "room_id",
+    )  # Added related search
+    readonly_fields = ("created_at", "updated_at", "csv_floor_link")
+    list_select_related = ("csv_floor__all_floors_data__floor_plan",)  # Optimize query
+
+    def csv_floor_link(self, obj):
+        if obj.csv_floor:
+            url = reverse("admin:backup_csvfloor_change", args=[obj.csv_floor.id])
+            return format_html(
+                '<a href="{}">{} (ID: {})</a>',
+                url,
+                obj.csv_floor.floor_name,
+                obj.csv_floor.id,
+            )
+        return "-"
+
+    csv_floor_link.short_description = "CSV Floor"
 
 
 @admin.register(CsvRoomPixelData)
 class CsvRoomPixelDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "csv_room",
+        "csv_room_link",  # Renamed for consistency
         "min_x_pixels",
         "min_y_pixels",
         "max_x_pixels",
@@ -430,26 +604,58 @@ class CsvRoomPixelDataAdmin(admin.ModelAdmin):
         "actual_area_pixels",
         "pixel_ratio",
     )
-    search_fields = ("room__room_name",)
+    search_fields = ("csv_room__room_name",)  # Corrected field lookup
+    readonly_fields = ("created_at", "updated_at", "csv_room_link")
+    list_select_related = ("csv_room__csv_floor",)  # Optimize query
+
+    def csv_room_link(self, obj):
+        if obj.csv_room:
+            url = reverse("admin:backup_csvroom_change", args=[obj.csv_room.id])
+            return format_html(
+                '<a href="{}">{} (ID: {})</a>',
+                url,
+                obj.csv_room.room_name,
+                obj.csv_room.id,
+            )
+        return "-"
+
+    csv_room_link.short_description = "CSV Room"
 
 
 @admin.register(CsvRoomDimensions)
 class CsvRoomDimensionsAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "csv_room",
+        "csv_room_link",  # Renamed for consistency
         "dimensions_imperial",
         "dimensions_metric",
         "max_area_metric",
         "max_area_imperial",
     )
-    search_fields = ("room__room_name",)
+    search_fields = ("csv_room__room_name",)  # Corrected field lookup
+    readonly_fields = ("created_at", "updated_at", "csv_room_link")
+    list_select_related = ("csv_room__csv_floor",)  # Optimize query
+
+    # Reusing the link method from CsvRoomPixelDataAdmin
+    csv_room_link = CsvRoomPixelDataAdmin.csv_room_link
+    csv_room_link.short_description = "CSV Room"
 
 
 @admin.register(CsvRoomScalingFactors)
 class CsvRoomScalingFactorsAdmin(admin.ModelAdmin):
-    list_display = ("id", "csv_room", "scale_metric", "scale_imperial")
-    search_fields = ("room__room_name",)
+    list_display = (
+        "id",
+        "csv_room_link",
+        "scale_metric",
+        "scale_imperial",
+    )  # Renamed for consistency
+    search_fields = ("csv_room__room_name",)  # Corrected field lookup
+    readonly_fields = ("created_at", "updated_at", "csv_room_link")
+    list_select_related = ("csv_room__csv_floor",)  # Optimize query
+
+    # Reusing the link method from CsvRoomPixelDataAdmin
+    csv_room_link = CsvRoomPixelDataAdmin.csv_room_link
+    csv_room_link.short_description = "CSV Room"
 
 
 @admin.register(AllFloorsCsvRawRow)
@@ -471,28 +677,33 @@ class AllFloorsCsvRawRowAdmin(admin.ModelAdmin):
         "all_floors_data__floor_plan__floorplan_id",
     )
     # Make fields read-only as it's backup data
-    readonly_fields = [
-        f.name for f in AllFloorsCsvRawRow._meta.get_fields() if f.name != "id"
-    ]
-    list_select_related = ("all_floors_data__floor_plan",)  # Optimize query
-    list_per_page = 100  # Show more per page
+    readonly_fields = [f.name for f in AllFloorsCsvRawRow._meta.get_fields()]
+    list_select_related = ("all_floors_data__floor_plan",)
+    list_per_page = 100
 
     def all_floors_data_link(self, obj):
         if obj.all_floors_data:
-            url = reverse(
-                "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
-            )
-            # Display floorplan ID for context
-            fp_id = obj.all_floors_data.floor_plan.floorplan_id
-            return format_html(
-                '<a href="{}">AFD ID: {} (FP: {})</a>',
-                url,
-                obj.all_floors_data.id,
-                fp_id,
-            )
+            try:
+                url = reverse(
+                    "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+                )
+                fp_id = (
+                    obj.all_floors_data.floor_plan.floorplan_id
+                    if obj.all_floors_data.floor_plan
+                    else "N/A"
+                )
+                return format_html(
+                    '<a href="{}">AFD ID: {} (FP: {})</a>',
+                    url,
+                    obj.all_floors_data.id,
+                    fp_id,
+                )
+            except NoReverseMatch:
+                return f"AFD ID: {obj.all_floors_data.id} (Link Error)"
         return "-"
 
     all_floors_data_link.short_description = "All Floors Data"
+    all_floors_data_link.admin_order_field = "all_floors_data"
 
 
 @admin.register(TotalAreaData)
@@ -513,17 +724,24 @@ class TotalAreaDataAdmin(admin.ModelAdmin):
 
     def all_floors_data_link(self, obj):  # DRY violation
         if obj.all_floors_data:
-            url = reverse(
-                "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
-            )
-            # Display floorplan ID for context
-            fp_id = obj.all_floors_data.floor_plan.floorplan_id
-            return format_html(
-                '<a href="{}">AFD ID: {} (FP: {})</a>',
-                url,
-                obj.all_floors_data.id,
-                fp_id,
-            )
+            try:
+                url = reverse(
+                    "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+                )
+                fp_id = (
+                    obj.all_floors_data.floor_plan.floorplan_id
+                    if obj.all_floors_data.floor_plan
+                    else "N/A"
+                )
+                return format_html(
+                    '<a href="{}">AFD ID: {} (FP: {})</a>',
+                    url,
+                    obj.all_floors_data.id,
+                    fp_id,
+                )
+            except NoReverseMatch:
+                return f"AFD ID: {obj.all_floors_data.id} (Link Error)"
         return "-"
 
     all_floors_data_link.short_description = "All Floors Data"
+    all_floors_data_link.admin_order_field = "all_floors_data"
