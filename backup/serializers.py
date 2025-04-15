@@ -2,7 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from backup.models import (
-    AllFloorsCsvRawRow,
+    AllFloorsCsvData,
     AllFloorsData,
     AnalysisTask,
     CsvFloor,
@@ -15,7 +15,7 @@ from backup.models import (
     PlanFloor,
     Property,
     ScrapingJob,
-    TotalAreaData,
+    TotalAreasCsvData,
 )
 
 # Use standard logging or your custom config
@@ -89,9 +89,9 @@ class CsvRoomScalingFactorsSerializer(serializers.ModelSerializer):
         exclude = ("csv_room", "id", "created_at", "updated_at")
 
 
-class AllFloorsCsvRawRowSerializer(serializers.ModelSerializer):
+class AllFloorsCsvDataSerializer(serializers.ModelSerializer):
     class Meta:
-        model = AllFloorsCsvRawRow
+        model = AllFloorsCsvData
         fields = [
             "floor_name",
             "room_name",
@@ -121,9 +121,9 @@ class AllFloorsCsvRawRowSerializer(serializers.ModelSerializer):
         ]
 
 
-class TotalAreaDataSerializer(serializers.ModelSerializer):
+class TotalAreasCsvDataSerializer(serializers.ModelSerializer):
     class Meta:
-        model = TotalAreaData
+        model = TotalAreasCsvData
         exclude = ("all_floors_data", "id", "created_at", "updated_at")
 
 
@@ -175,10 +175,10 @@ class CsvFloorSerializer(serializers.ModelSerializer):
 class AllFloorsDataSerializer(serializers.ModelSerializer):
     # Nested serializers for write operations
     backup_csv_floors = CsvFloorSerializer(many=True, required=False, default=[])
-    backup_all_floors_raw_rows = AllFloorsCsvRawRowSerializer(
+    all_floors_csv_data = AllFloorsCsvDataSerializer(
         many=True, required=False, default=[]
     )
-    backup_total_area_data = TotalAreaDataSerializer(
+    total_areas_csv_data = TotalAreasCsvDataSerializer(
         many=True, required=False, default=[]
     )
 
@@ -190,8 +190,8 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
         """Creates AllFloorsData and all its nested children."""
         # ... (create logic remains the same as before) ...
         backup_csv_floors_data = validated_data.pop("backup_csv_floors", [])
-        backup_raw_rows_data = validated_data.pop("backup_all_floors_raw_rows", [])
-        backup_total_area_data = validated_data.pop("backup_total_area_data", [])
+        backup_raw_rows_data = validated_data.pop("all_floors_csv_data", [])
+        total_areas_csv_data = validated_data.pop("total_areas_csv_data", [])
 
         all_floors_data_instance = AllFloorsData.objects.create(**validated_data)
         logger.debug(
@@ -269,21 +269,21 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
                     f"    Bulk created related data for {len(created_rooms)} rooms."
                 )
 
-        # --- Bulk Create AllFloorsCsvRawRow ---
+        # --- Bulk Create AllFloorsCsvData ---
         raw_rows_to_create = [
-            AllFloorsCsvRawRow(all_floors_data=all_floors_data_instance, **raw_row_data)
+            AllFloorsCsvData(all_floors_data=all_floors_data_instance, **raw_row_data)
             for raw_row_data in backup_raw_rows_data
         ]
         if raw_rows_to_create:
-            AllFloorsCsvRawRow.objects.bulk_create(raw_rows_to_create)
+            AllFloorsCsvData.objects.bulk_create(raw_rows_to_create)
             logger.debug(
-                f"  Bulk created {len(raw_rows_to_create)} AllFloorsCsvRawRow instances."
+                f"  Bulk created {len(raw_rows_to_create)} AllFloorsCsvData instances."
             )
 
-        # --- Create/Update TotalAreaData ---
+        # --- Create/Update TotalAreasCsvData ---
         total_area_instances = []
-        for ta_data in backup_total_area_data:
-            ta_instance, created = TotalAreaData.objects.update_or_create(
+        for ta_data in total_areas_csv_data:
+            ta_instance, created = TotalAreasCsvData.objects.update_or_create(
                 all_floors_data=all_floors_data_instance,
                 area_name=ta_data.get("area_name"),
                 defaults=ta_data,
@@ -291,7 +291,7 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
             total_area_instances.append(ta_instance)
         if total_area_instances:
             logger.debug(
-                f"  Created/Updated {len(total_area_instances)} TotalAreaData instances."
+                f"  Created/Updated {len(total_area_instances)} TotalAreasCsvData instances."
             )
 
         return all_floors_data_instance

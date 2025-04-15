@@ -4,7 +4,7 @@ from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html
 
 from backup.models import (
-    AllFloorsCsvRawRow,
+    AllFloorsCsvData,
     AllFloorsData,
     AnalysisTask,
     CsvFloor,
@@ -17,7 +17,7 @@ from backup.models import (
     PlanFloor,
     Property,
     ScrapingJob,
-    TotalAreaData,
+    TotalAreasCsvData,
 )
 
 # --- Filters (No changes needed here) ---
@@ -658,8 +658,8 @@ class CsvRoomScalingFactorsAdmin(admin.ModelAdmin):
     csv_room_link.short_description = "CSV Room"
 
 
-@admin.register(AllFloorsCsvRawRow)
-class AllFloorsCsvRawRowAdmin(admin.ModelAdmin):
+@admin.register(AllFloorsCsvData)
+class AllFloorsCsvDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "all_floors_data_link",
@@ -677,7 +677,7 @@ class AllFloorsCsvRawRowAdmin(admin.ModelAdmin):
         "all_floors_data__floor_plan__floorplan_id",
     )
     # Make fields read-only as it's backup data
-    readonly_fields = [f.name for f in AllFloorsCsvRawRow._meta.get_fields()]
+    readonly_fields = [f.name for f in AllFloorsCsvData._meta.get_fields()]
     list_select_related = ("all_floors_data__floor_plan",)
     list_per_page = 100
 
@@ -706,8 +706,8 @@ class AllFloorsCsvRawRowAdmin(admin.ModelAdmin):
     all_floors_data_link.admin_order_field = "all_floors_data"
 
 
-@admin.register(TotalAreaData)
-class TotalAreaDataAdmin(admin.ModelAdmin):
+@admin.register(TotalAreasCsvData)
+class TotalAreasCsvDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "all_floors_data_link",

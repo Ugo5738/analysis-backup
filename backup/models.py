@@ -1,7 +1,12 @@
+import hashlib
+
 from django.db import models
 from simple_history.models import HistoricalRecords
 
 from helpers.models import TrackingModel
+from pabackup_service.config.logging_config import configure_logger
+
+logger = configure_logger(__name__)
 
 ANALYSIS_SOURCE = [("email", "Email"), ("original", "Original")]
 
@@ -38,18 +43,17 @@ class Property(models.Model):
     analysis_source = models.CharField(
         max_length=20, choices=ANALYSIS_SOURCE, default="original"
     )
+    updated_at = models.DateTimeField(auto_now=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_properties")
 
     class Meta:
-        # db_table = "properties"
+        db_table = "sdb_properties"
         verbose_name = "Property Data"
         verbose_name_plural = "Property Data Records"
 
     def __str__(self):
         return f"Property {self.primary_key} - {self.address or 'No Address'}"
-
-    updated_at = models.DateTimeField(auto_now=True)
 
 
 class AnalysisTask(models.Model):
@@ -63,10 +67,10 @@ class AnalysisTask(models.Model):
     trigger_analysis = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_analysis_tasks")
 
     class Meta:
-        # db_table = "analysis_tasks"
+        db_table = "sdb_analysis_tasks"
         verbose_name = "Analysis Task"
         verbose_name_plural = "Analysis Tasks"
 
@@ -89,8 +93,7 @@ class ScrapingJob(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        # db_table = "scraping_jobs"
-
+        db_table = "sdb_scraping_jobs"
         verbose_name = "Scraping Job"
         verbose_name_plural = "Scraping Jobs"
 
@@ -98,16 +101,15 @@ class ScrapingJob(models.Model):
 # === Floorplan Models ===
 
 
-# Mimic floorplan/models.py: FloorPlanAnalysisResult
 class FloorPlanAnalysisResult(TrackingModel):
     message = models.CharField(max_length=255)
     user_id = models.CharField(max_length=255)
     property_id = models.CharField(max_length=255)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_analysis_results")
 
     class Meta:
-        # db_table = "fp_analysis_results"
+        db_table = "sdb_fp_analysis_results"
         unique_together = ("user_id", "property_id")
         indexes = [
             models.Index(fields=["user_id", "property_id"]),
@@ -119,7 +121,6 @@ class FloorPlanAnalysisResult(TrackingModel):
         return f"Analysis: {self.user_id} - {self.property_id} (ID: {self.id})"
 
 
-# Mimic FloorPlan model
 class FloorPlan(TrackingModel):
     analysis_result = models.ForeignKey(
         FloorPlanAnalysisResult,
@@ -127,12 +128,22 @@ class FloorPlan(TrackingModel):
         on_delete=models.CASCADE,
     )
     floorplan_id = models.CharField(max_length=255)
+    # floorplan_id = models.CharField(
+    #     max_length=64,
+    #     db_index=True,  # unique=True,
+    # )  # Ensures DB-level uniqueness and speeds up lookups
     original_url = models.URLField()
+    # original_url = models.URLField(
+    #     max_length=1024
+    # )
+    # update_count = models.PositiveIntegerField(
+    #     default=0, help_text="Number of times webhook processing updated this record."
+    # )
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_floorplans")
 
     class Meta:
-        # db_table = "floorplans"
+        db_table = "sdb_floorplans"
         unique_together = ("analysis_result", "floorplan_id")
         indexes = [
             models.Index(
@@ -144,10 +155,33 @@ class FloorPlan(TrackingModel):
         verbose_name_plural = "Floor Plans"
 
     def __str__(self):
-        return f"FloorPlan: {self.floorplan_id} (AnalysisID: {self.analysis_result_id})"
+        # Show first 8 chars of hash for brevity in admin dropdowns etc.
+        short_hash = self.floorplan_id[:8] if self.floorplan_id else "N/A"
+        return f"FP Hash: {short_hash}... (Analysis: {self.analysis_result_id})"
+
+    @staticmethod
+    def generate_hash_id(property_id, user_id, url):
+        """
+        Generates a SHA-256 hash for the combination of property ID, user ID,
+        and URL string.
+        """
+        if not all([property_id, user_id, url]):  # Ensure all parts are non-empty
+            raise ValueError(
+                "Cannot generate hash: property_id, user_id, and url must all be provided and non-empty."
+            )
+
+        try:
+            # Combine the strings with a separator unlikely to appear in the inputs
+            combined_string = f"{property_id}|{user_id}|{url}"
+            string_bytes = combined_string.encode("utf-8")
+            return hashlib.sha256(string_bytes).hexdigest()
+        except Exception as e:
+            logger.error(
+                f"Error generating combined hash for '{property_id}|{user_id}|{url}': {e}"
+            )
+            raise ValueError(f"Hashing failed for combined input") from e
 
 
-# Mimic AllFloorsData model
 class AllFloorsData(TrackingModel):
     floor_plan = models.OneToOneField(
         FloorPlan, related_name="backup_all_floors_data", on_delete=models.CASCADE
@@ -157,23 +191,29 @@ class AllFloorsData(TrackingModel):
     total_area_csv_url = models.URLField()
     image_labelme_side_by_side_url = models.URLField()
     notes = models.TextField(blank=True, null=True)
+    # json_file_url = models.URLField(max_length=1024, null=True, blank=True)
+    # csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    # total_area_csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    # image_labelme_side_by_side_url = models.URLField(
+    #     max_length=1024, null=True, blank=True
+    # )
+    # notes = models.TextField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_all_floors_data")
 
     class Meta:
-        # db_table = "fp_all_floors_data"
-        pass
+        db_table = "sdb_fp_all_floors_data"
 
     def __str__(self):
-        return f"Backup All Floors Data for {self.floor_plan.floorplan_id}"
+        fp_id = self.floor_plan.floorplan_id if self.floor_plan else "N/A"
+        return f"All Floors Data for {fp_id}"
 
 
-# Mimic PlanFloor model
 class PlanFloor(TrackingModel):
     floor_plan = models.ForeignKey(
         FloorPlan, related_name="backup_plan_floors", on_delete=models.CASCADE
     )
-    floor = models.CharField(max_length=255)
+    floor = models.CharField(max_length=255)  # e.g., "first_floor" or "ground_floor"
     label_me_url = models.URLField()
     json_file_url = models.URLField()
     image_url = models.URLField()
@@ -181,17 +221,23 @@ class PlanFloor(TrackingModel):
     csv_url = models.URLField()
     image_side_by_side_url = models.URLField()
 
-    history = HistoricalRecords()
+    # label_me_url = models.URLField(max_length=1024, null=True, blank=True)
+    # json_file_url = models.URLField(max_length=1024, null=True, blank=True)
+    # image_url = models.URLField(max_length=1024, null=True, blank=True)
+    # labelme_image_url = models.URLField(max_length=1024, null=True, blank=True)
+    # csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    # image_side_by_side_url = models.URLField(max_length=1024, null=True, blank=True)
+
+    history = HistoricalRecords(table_name="history_sdb_fp_plan_floors")
 
     class Meta:
-        # db_table = "fp_plan_floors"
-        pass
+        db_table = "sdb_fp_plan_floors"
 
     def __str__(self):
-        return f"{self.floor} - {self.floor_plan.floorplan_id}"
+        fp_id = self.floor_plan.floorplan_id if self.floor_plan else "N/A"
+        return f"{self.floor} - {fp_id}"
 
 
-# Mimic CsvFloor model
 class CsvFloor(TrackingModel):  # AllFloorsCsvfloor
     all_floors_data = models.ForeignKey(
         AllFloorsData, related_name="backup_csv_floors", on_delete=models.CASCADE
@@ -200,14 +246,14 @@ class CsvFloor(TrackingModel):  # AllFloorsCsvfloor
     calculated_total_area_metric = models.FloatField(null=True, blank=True)
     calculated_total_area_imperial = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_floors")
 
     class Meta:
-        # db_table = "fp_csv_floors"
-        pass
+        db_table = "sdb_fp_csv_floors"
 
     def __str__(self):
-        return self.floor_name
+        # Handle potential None for floor_name
+        return self.floor_name or f"Unnamed Floor (ID: {self.id})"
 
 
 # Mimic CsvRoom model
@@ -218,21 +264,27 @@ class CsvRoom(TrackingModel):
     room_name = models.CharField(max_length=100, null=True, blank=True)
     is_segment = models.CharField(max_length=50, null=True, blank=True)
     room_id = models.FloatField(null=True, blank=True)
+    # room_id = models.FloatField(
+    #     null=True, blank=True, db_index=True  # Index room_id within a floor
+    # )
     no_of_doors = models.FloatField(null=True, blank=True)
     no_of_windows = models.FloatField(null=True, blank=True)
     no_of_room_points = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_rooms")
 
     class Meta:
-        # db_table = "fp_csv_room_pixel_data"
-        pass
+        db_table = "sdb_fp_csv_rooms"
 
     def __str__(self):
-        return f"{self.room_name} ({self.floor.floor_name})"
+        try:
+            floor_name = self.csv_floor.floor_name or "Unnamed Floor"
+        except CsvFloor.DoesNotExist:
+            floor_name = "Detached Floor"
+        room_name = self.room_name or f"Unnamed Room (ID: {self.id})"
+        return f"{room_name} ({floor_name})"
 
 
-# Mimic CsvRoomPixelData model
 class CsvRoomPixelData(TrackingModel):
     csv_room = models.OneToOneField(
         CsvRoom, on_delete=models.CASCADE, related_name="backup_pixel_data"
@@ -245,41 +297,56 @@ class CsvRoomPixelData(TrackingModel):
     actual_area_pixels = models.FloatField(null=True, blank=True)
     pixel_ratio = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_room_pixel_data")
 
     class Meta:
-        # db_table = "fp_csv_room_dimensions"
-        pass
+        db_table = "sdb_fp_csv_room_pixel_data"
 
     def __str__(self):
-        return f"Backup Pixel Data for {self.room.room_name}"
+        try:
+            room_name = self.csv_room.room_name or f"Unnamed Room (ID: {self.room.id})"
+            return f"Pixel Data for {room_name}"
+        except CsvRoom.DoesNotExist:
+            return f"Pixel Data for Detached Room (ID: {self.id})"
 
 
-# Mimic CsvRoomDimensions model
 class CsvRoomDimensions(TrackingModel):
     csv_room = models.OneToOneField(
         CsvRoom, on_delete=models.CASCADE, related_name="backup_dimensions"
     )
+    # Text fields for dimensions (Handles 'Unknown')
     dimensions_imperial = models.CharField(max_length=100, null=True, blank=True)
     dimensions_metric = models.CharField(max_length=100, null=True, blank=True)
+
+    # Numeric fields for maximum areas
     max_area_metric = models.FloatField(null=True, blank=True)
     max_area_imperial = models.FloatField(null=True, blank=True)
-    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
-    calculated_floor_total_sq_area_metric = models.FloatField(null=True, blank=True)
-    calculated_area_imperial = models.FloatField(null=True, blank=True)
-    calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    # Numeric fields for calculated areas:
+    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
+    calculated_area_imperial = models.FloatField(null=True, blank=True)
+
+    calculated_floor_total_sq_area_metric = models.FloatField(
+        null=True, blank=True
+    )  # remove this
+
+    calculated_floor_total_sq_area_imperial = models.FloatField(
+        null=True, blank=True
+    )  # remove this
+
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_room_dimensions")
 
     class Meta:
-        # db_table = "fp_csv_room_dimensions"
-        pass
+        db_table = "sdb_fp_csv_room_dimensions"
 
     def __str__(self):
-        return f"Backup Dimensions for {self.room.room_name}"
+        try:
+            room_name = self.csv_room.room_name or f"Unnamed Room (ID: {self.room.id})"
+            return f"Dimensions for {room_name}"
+        except CsvRoom.DoesNotExist:
+            return f"Dimensions for Detached Room (ID: {self.id})"
 
 
-# Mimic CsvRoomScalingFactors model
 class CsvRoomScalingFactors(TrackingModel):
     csv_room = models.OneToOneField(
         CsvRoom, on_delete=models.CASCADE, related_name="backup_scaling_factors"
@@ -287,31 +354,37 @@ class CsvRoomScalingFactors(TrackingModel):
     scale_metric = models.FloatField(null=True, blank=True)
     scale_imperial = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_room_scaling_factors")
 
     class Meta:
-        # db_table = "fp_csv_room_scaling_factors"
-        pass
+        db_table = "sdb_fp_csv_room_scaling_factors"
 
     def __str__(self):
-        return f"Backup Scaling Factors for {self.room.room_name}"
+        try:
+            room_name = self.csv_room.room_name or f"Unnamed Room (ID: {self.room.id})"
+            return f"Scaling Factors for {room_name}"
+        except CsvRoom.DoesNotExist:
+            return f"Scaling Factors for Detached Room (ID: {self.id})"
 
 
-# Mimic AllFloorsCsvRawRow model
-class AllFloorsCsvRawRow(TrackingModel):
+class AllFloorsCsvData(TrackingModel):
     """Stores a raw representation of a single row from all_floors.csv."""
 
     all_floors_data = models.ForeignKey(
         AllFloorsData,
         on_delete=models.CASCADE,
-        related_name="backup_all_floors_raw_rows",
+        related_name="all_floors_csv_data",
     )
-    # Match fields from floorplan service's AllFloorsCsvRawRow model
+
+    # --- Fields matching CSV columns ---
+    # Object/String Columns
     floor_name = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     room_name = models.CharField(max_length=100, null=True, blank=True)
     is_segment = models.CharField(max_length=50, null=True, blank=True)
     dimensions_imperial = models.CharField(max_length=100, null=True, blank=True)
     dimensions_metric = models.CharField(max_length=100, null=True, blank=True)
+
+    # Float64/Numeric Columns
     room_id = models.FloatField(null=True, blank=True, db_index=True)
     no_of_door = models.FloatField(null=True, blank=True)
     no_of_window = models.FloatField(null=True, blank=True)
@@ -333,10 +406,54 @@ class AllFloorsCsvRawRow(TrackingModel):
     calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
     # Add other fields if they exist in the source model/CSV (e.g., the numbered columns)
 
-    history = HistoricalRecords()
+    # min_x_pixels = models.FloatField(
+    #     null=True, blank=True, db_column="min_x_pixels_csv"
+    # )  # Use db_column if name conflicts/desired
+    # min_y_pixels = models.FloatField(
+    #     null=True, blank=True, db_column="min_y_pixels_csv"
+    # )
+    # max_x_pixels = models.FloatField(
+    #     null=True, blank=True, db_column="max_x_pixels_csv"
+    # )
+    # max_y_pixels = models.FloatField(
+    #     null=True, blank=True, db_column="max_y_pixels_csv"
+    # )
+    # max_area_metric = models.FloatField(
+    #     null=True, blank=True, db_column="max_area_metric_csv"
+    # )
+    # max_area_imperial = models.FloatField(
+    #     null=True, blank=True, db_column="max_area_imperial_csv"
+    # )
+    # max_area_pixels = models.FloatField(
+    #     null=True, blank=True, db_column="max_area_pixels_csv"
+    # )
+    # actual_area_pixels = models.FloatField(
+    #     null=True, blank=True, db_column="actual_area_pixels_csv"
+    # )
+    # pixel_ratio = models.FloatField(null=True, blank=True, db_column="pixel_ratio_csv")
+    # scale_metric = models.FloatField(
+    #     null=True, blank=True, db_column="scale_metric_csv"
+    # )
+    # scale_imperial = models.FloatField(
+    #     null=True, blank=True, db_column="scale_imperial_csv"
+    # )
+    # calculated_sq_area_metric = models.FloatField(
+    #     null=True, blank=True, db_column="calculated_sq_area_metric_csv"
+    # )
+    # calculated_floor_total_sq_area_metric = models.FloatField(
+    #     null=True, blank=True, db_column="calc_floor_total_metric_csv"
+    # )
+    # calculated_area_imperial = models.FloatField(
+    #     null=True, blank=True, db_column="calculated_area_imperial_csv"
+    # )  # Note lowercase 'c'
+    # calculated_floor_total_sq_area_imperial = models.FloatField(
+    #     null=True, blank=True, db_column="calc_floor_total_imperial_csv"
+    # )
+
+    history = HistoricalRecords(table_name="history_sdb_all_floors_csv_data")
 
     class Meta:
-        # db_table = "fp_all_floors_raw_rows"
+        db_table = "sdb_all_floors_csv_data"
         verbose_name = "All Floors CSV Raw Row"
         verbose_name_plural = "All Floors CSV Raw Rows"
         indexes = [
@@ -351,12 +468,11 @@ class AllFloorsCsvRawRow(TrackingModel):
         )
 
 
-# Mimic TotalAreaData model
-class TotalAreaData(TrackingModel):
+class TotalAreasCsvData(TrackingModel):
     """Stores parsed data from the total_area.csv file (backup)."""
 
     all_floors_data = models.ForeignKey(
-        AllFloorsData, related_name="backup_total_area_data", on_delete=models.CASCADE
+        AllFloorsData, related_name="total_areas_csv_data", on_delete=models.CASCADE
     )
     area_name = models.CharField(max_length=500, null=True, blank=True)
     square_meters = models.FloatField(null=True, blank=True)
@@ -377,13 +493,13 @@ class TotalAreaData(TrackingModel):
     input_text_tokens = models.IntegerField(null=True, blank=True)
     output_text_tokens = models.IntegerField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_total_areas_csv_data")
 
     class Meta:
-        # db_table = "fp_total_area_data"
+        db_table = "sdb_total_areas_csv_data"
         unique_together = ("all_floors_data", "area_name")
-        verbose_name = "Total Area Data"
-        verbose_name_plural = "Total Area Data"
+        verbose_name = "Total Area CSV Data"
+        verbose_name_plural = "Total Area CSV Data"
 
     def __str__(self):
         afd_id = (

@@ -7,12 +7,12 @@ from django.db.models.functions import Length
 
 # Import necessary models
 from backup.models import (  # Import others ONLY if directly queried for dates below
-    AllFloorsCsvRawRow,
+    AllFloorsCsvData,
     AllFloorsData,
     FloorPlan,
     FloorPlanAnalysisResult,
     Property,
-    TotalAreaData,
+    TotalAreasCsvData,
 )
 
 
@@ -372,10 +372,10 @@ class Command(BaseCommand):
                 )
             )
 
-            # 16. Number of properties with AI Floorplan Analysis - AllFloorsCsvRawRow
-            # Note: Renamed from "with allfloors CSV AllFloorsCsvRawRow" for clarity
+            # 16. Number of properties with AI Floorplan Analysis - AllFloorsCsvData
+            # Note: Renamed from "with allfloors CSV AllFloorsCsvData" for clarity
             allfloors_raw_rows_qs = AllFloorsData.objects.filter(
-                backup_all_floors_raw_rows__isnull=False
+                all_floors_csv_data__isnull=False
             ).distinct()  # Distinct AllFloorsData linked to raw rows
             # Count distinct properties linked
             prop_ids_raw_rows = allfloors_raw_rows_qs.values_list(
@@ -388,7 +388,7 @@ class Command(BaseCommand):
             )
             self.stdout.write(
                 format_output(
-                    "Number of properties with AI Floorplan Analysis - AllFloorsCsvRawRow data present",
+                    "Number of properties with AI Floorplan Analysis - AllFloorsCsvData data present",
                     properties_ai_fp_raw_rows_count,
                     min_c,
                     max_u,
