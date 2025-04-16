@@ -6,7 +6,7 @@ from django.db.models import Count, F, Max, Min, Q, Sum  # Ensure Min, Max are i
 from django.db.models.functions import Length
 
 # Import necessary models
-from backup.models import (  # Import others ONLY if directly queried for dates below
+from sdb.models import (  # Import others ONLY if directly queried for dates below
     AllFloorsCsvData,
     AllFloorsData,
     FloorPlan,
@@ -70,12 +70,12 @@ def format_output(label, count, min_created, max_updated):
 
 
 class Command(BaseCommand):
-    help = "Generates statistics report for the backup application data, including date ranges per statistic."
+    help = "Generates statistics report for the application data, including date ranges per statistic."
 
     def handle(self, *args, **options):
         self.stdout.write(
             self.style.SUCCESS(
-                "--- Generating Backup Application Statistics (with Date Ranges per Stat) ---"
+                "--- Generating Application Statistics (with Date Ranges per Stat) ---"
             )
         )
 
@@ -110,7 +110,7 @@ class Command(BaseCommand):
             # We already calculated this and its date range above
             self.stdout.write(
                 format_output(
-                    "Number of properties scraped (in backup)",
+                    "Number of properties scraped (in sdb)",
                     total_properties_count,
                     *get_date_range_for_queryset(all_properties_qs, Property),
                 )
@@ -324,7 +324,7 @@ class Command(BaseCommand):
             # 14. Number of properties with an AI Floorplan Analysis (has FloorPlan record)
             # FIX: Avoid distinct + aggregate. Get relevant FPAR IDs then filter.
             ai_fpar_ids = (
-                FloorPlanAnalysisResult.objects.filter(backup_floor_plans__isnull=False)
+                FloorPlanAnalysisResult.objects.filter(sdb_floor_plans__isnull=False)
                 .values_list("id", flat=True)
                 .distinct()
             )  # Get IDs of FPARs linked to FloorPlans

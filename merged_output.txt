@@ -1,1031 +1,20 @@
-# accounts/models.py
-import uuid
-from datetime import timedelta
+# sdb/models.py
+import hashlib
 
-from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.db import models
-from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
-from django_countries.fields import CountryField
-
-from helpers.models import TrackingModel
-
-GENDER_CHOICES = (("M", "Male"), ("F", "Female"))
-
-
-class UserManager(BaseUserManager):
-    use_in_migrations = True
-
-    def _create_user(self, email, password, **extra_fields):
-        if not email:
-            raise ValueError("Users require an email field")
-
-        email = self.normalize_email(email)
-        user = self.model(email=email, **extra_fields)
-        user.set_password(password)
-        user.save(using=self._db)
-        return user
-
-    def create_user(self, email, password=None, **extra_fields):
-        extra_fields.setdefault("is_staff", False)
-        extra_fields.setdefault("is_superuser", False)
-        return self._create_user(email, password, **extra_fields)
-
-    def create_superuser(self, email, password, **extra_fields):
-        extra_fields.setdefault("is_staff", True)
-        extra_fields.setdefault("is_superuser", True)
-
-        if extra_fields.get("is_staff") is not True:
-            raise ValueError("Superuser must have is_staff=True.")
-        if extra_fields.get("is_superuser") is not True:
-            raise ValueError("Superuser must have is_superuser=True.")
-
-        return self._create_user(email, password, **extra_fields)
-
-
-class User(AbstractUser, TrackingModel):
-    email = models.EmailField(
-        _("email address"), db_index=True, blank=True, null=True, unique=True
-    )
-    username = models.CharField(
-        _("username"), max_length=30, blank=True, null=True, unique=False
-    )
-    phone = models.CharField(max_length=60, blank=True, null=True)
-    gender = models.CharField(
-        max_length=1, choices=GENDER_CHOICES, blank=True, null=True
-    )
-    date_of_birth = models.DateField(null=True, blank=True)
-    profile_picture = models.ImageField(
-        upload_to="profile_pics/", null=True, blank=True
-    )
-
-    email_verification_token = models.CharField(max_length=128, null=True, blank=True)
-    email_verified = models.BooleanField(
-        _("email verified"),
-        default=False,
-        help_text="Designates whether this users email is verified.",
-    )
-
-    objects = UserManager()
-
-    USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = []
-
-    def __str__(self):
-        return "{}".format(self.email)
-
-    class Meta:
-        verbose_name = _("User")
-        verbose_name_plural = _("Users")
-
-
-class OrganizationProfile(TrackingModel):
-    user = models.OneToOneField(
-        User, on_delete=models.CASCADE, related_name="organization_profile"
-    )
-    name = models.CharField(max_length=100)
-    bio = models.TextField(max_length=500, blank=True, null=True)
-
-    # organization address
-    city = models.CharField(max_length=50, blank=True, null=True)
-    address = models.CharField(max_length=255, null=True, blank=True)
-    address2 = models.CharField(max_length=255, null=True, blank=True)
-    country = CountryField(multiple=False, null=True, blank=True)
-    zip_code = models.CharField(max_length=200, null=True, blank=True)
-
-    def __str__(self):
-        return "{}".format(self.name)
-
-    class Meta:
-        verbose_name = _("Organization")
-        verbose_name_plural = _("Organizations")
-
-
-class UserToken(models.Model):
-    phone_number = models.CharField(max_length=20)
-    token = models.UUIDField(default=uuid.uuid4, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-
-# accounts/serializers.py
-from django.contrib.auth.password_validation import validate_password
-from rest_framework import serializers
-
-from accounts import models
-
-
-class OrganizationProfileSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.OrganizationProfile
-        # fields = '__all__'
-        fields = ["name", "country"]  # added to registration form
-
-
-class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, validators=[validate_password])
-    country = serializers.CharField(write_only=True, required=False)
-
-    class Meta:
-        model = models.User
-        fields = ['email', 'password', 'country', 'first_name', 'last_name']
-        extra_kwargs = {
-            'first_name': {'required': False},
-            'last_name': {'required': False},
-        }
-
-    def create(self, validated_data):
-        country = validated_data.pop('country', None)
-        user = models.User.objects.create_user(**validated_data)
-        if country:
-            models.OrganizationProfile.objects.create(user=user, country=country)
-        return user
-
-
-class UserSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(source="get_full_name", read_only=True)
-    user_role = serializers.CharField(source="get_user_role", read_only=True)
-
-    class Meta:
-        model = models.User
-        # fields = '__all__'
-        exclude = ["password", "groups", "user_permissions"]
-
-
-class ChangePasswordSerializer(serializers.Serializer):
-    """
-    Serializer for password change endpoint.
-    """
-
-    old_password = serializers.CharField(required=True)
-    new_password = serializers.CharField(required=True)
-
-
-class ResetPasswordRequestSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-
-
-# accounts/__init__.py
-
-
-# accounts/apps.py
-from django.apps import AppConfig
-
-
-class AccountsConfig(AppConfig):
-    default_auto_field = "django.db.models.BigAutoField"
-    name = "accounts"
-
-
-# accounts/forms.py
-from django import forms
-from django.contrib.auth.forms import (
-    AuthenticationForm,
-    PasswordChangeForm,
-    PasswordResetForm,
-    UserCreationForm,
-)
-from django.utils.translation import gettext_lazy as _
-
-from accounts.models import User
-
-
-class UserLoginForm(AuthenticationForm):
-    username = forms.EmailField(
-        required=True,
-        label=_("Email: "),
-        widget=forms.TextInput(
-            attrs={
-                "type": "email",
-                "class": "form-control form-control-user",
-                "id": "exampleInputEmail",
-                "aria-describedby": "emailHelp",
-                "placeholder": "Enter Email Address...",
-            }
-        ),
-    )
-    password = forms.CharField(
-        widget=forms.PasswordInput(
-            attrs={
-                "type": "password",
-                "class": "form-control form-control-user",
-                "placeholder": "Password",
-                "id": "exampleInputPassword",
-            }
-        )
-    )
-
-    # ADD REMEMBER ME
-    class Meta:
-        model = User
-        fields = ("username", "password")
-
-
-class SignUpForm(UserCreationForm):
-    email = forms.EmailField(
-        max_length=254,
-        required=True,
-        help_text=_("Required. Enter a valid email address."),
-        widget=forms.EmailInput(
-            attrs={
-                "class": "form-control form-control-user",
-                "id": "exampleInputEmail",
-                "type": "email",
-                "placeholder": "Email Address",
-            }
-        ),
-    )
-    first_name = forms.CharField(
-        max_length=30,
-        required=True,
-        help_text=_("Enter First Name."),
-        widget=forms.TextInput(
-            attrs={
-                "type": "text",
-                "class": "form-control form-control-user",
-                "id": "exampleFirstName",
-                "placeholder": "First Name",
-            }
-        ),
-    )
-    last_name = forms.CharField(
-        max_length=30,
-        required=True,
-        help_text=_("Enter Last Name."),
-        widget=forms.TextInput(
-            attrs={
-                "type": "text",
-                "class": "form-control form-control-user",
-                "id": "exampleLastName",
-                "placeholder": "Last Name",
-            }
-        ),
-    )
-    password1 = forms.CharField(
-        max_length=22,
-        min_length=8,
-        required=True,
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "form-control form-control-user",
-                "id": "exampleInputPassword",
-                "type": "password",
-                "placeholder": "Password",
-                "maxlength": "22",
-                "minlength": "8",
-            }
-        ),
-    )
-    password2 = forms.CharField(
-        max_length=22,
-        min_length=8,
-        required=True,
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "form-control form-control-user",
-                "id": "exampleInputPassword",
-                "type": "password",
-                "placeholder": "Repeat Password",
-                "maxlength": "22",
-                "minlength": "8",
-            }
-        ),
-    )
-
-    def clean_email(self):
-        email = self.cleaned_data.get("email")
-        if email and User.objects.filter(email=email).exists():
-            raise forms.ValidationError(
-                f"This email address is already in use. Please use a different email."
-            )
-        return email
-
-    class Meta:
-        model = User
-        fields = (
-            "email",
-            "first_name",
-            "last_name",
-            "password1",
-            "password2",
-            "phone",  # Not sure this is needed it is not in the front page
-        )
-
-
-class CustomPasswordResetForm(PasswordResetForm):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["email"].widget.attrs.update(
-            {
-                "class": "form-control form-control-user",
-                "placeholder": "Enter Email Address...",
-            }
-        )
-
-
-class ChangePasswordForm(PasswordChangeForm):
-    old_password = forms.CharField(
-        widget=forms.TextInput(
-            attrs={"class": "form-control mb-3", "placeholder": "Old Password"}
-        ),
-    )
-    new_password1 = forms.CharField(
-        widget=forms.TextInput(
-            attrs={"class": "form-control mb-3", "placeholder": "New Password"}
-        ),
-    )
-    new_password2 = forms.CharField(
-        widget=forms.TextInput(
-            attrs={"class": "form-control mb-3", "placeholder": "Confirm New Password"}
-        ),
-    )
-
-    class Meta:
-        model = User
-        fields = (
-            "old_password",
-            "new_password1",
-            "new_password2",
-        )
-
-
-# accounts/admin.py
-from django.contrib import admin
-from django.utils.html import format_html
-
-from accounts.models import OrganizationProfile, User, UserToken
-
-
-class UserAdmin(admin.ModelAdmin):
-    list_display = [
-        "id",
-        "email",
-        "username",
-        "phone",
-        "gender",
-        "email_verified",
-    ]
-    list_filter = ["email_verified", "date_of_birth"]
-    search_fields = ["email", "username", "phone"]
-
-
-class OrganizationProfileAdmin(admin.ModelAdmin):
-    list_display = ["id", "name", "bio", "city", "address", "country", "zip_code"]
-    list_filter = ["city", "country"]
-    search_fields = ["name", "bio", "city", "address", "zip_code"]
-    raw_id_fields = ["user"]
-
-
-class UserTokenAdmin(admin.ModelAdmin):
-    list_display = [
-        "phone_number",
-        "token",
-        "created_at",
-    ]
-    list_filter = ["phone_number"]
-    search_fields = ["phone_number"]
-
-
-admin.site.register(User, UserAdmin)
-admin.site.register(OrganizationProfile, OrganizationProfileAdmin)
-admin.site.register(UserToken, UserTokenAdmin)
-
-
-# accounts/pagination.py
-from rest_framework import pagination
-
-
-class CustomPageNumberPagination(pagination.PageNumberPagination):
-    page_size = 1
-    page_size_query_param = "count"
-    max_page_size = 5
-    page_query_param = "p"
-
-
-# accounts/tests.py
-from django.test import TestCase
-
-# Create your tests here.
-
-
-# accounts/urls.py
-from django.conf import settings
-from django.conf.urls.static import static
-from django.contrib.auth import views as auth_views
-from django.contrib.staticfiles.urls import staticfiles_urlpatterns
-from django.urls import include, path
-from rest_framework import routers
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-    TokenVerifyView,
-)
-
-from accounts import forms, views
-
-router = routers.DefaultRouter()
-
-router.register(r"users", views.UserViewSet, basename="user")
-
-admin_urls = [
-    path("", include(router.urls)),
-    path("user/", views.CurrentUserDetailView.as_view(), name="current_user"),
-]
-
-manual_tokens = [
-    path(
-        "generate-token/",
-        views.GenerateTokenView.as_view(),
-        name="generate_auth",
-    ),
-    path(
-        "authenticate-token/",
-        views.TokenAuthenticationView.as_view(),
-        name="authenticate_auth",
-    ),
-    path(
-        "authenticate-phone/",
-        views.PhoneAuthenticationView.as_view(),
-        name="authenticate-phone",
-    ),
-    path(
-        "check-authenticated/",
-        views.CheckAuthenticatedView.as_view(),
-        name="check-authenticated",
-    ),
-]
-
-jwt_urls = [
-    path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
-    path("change-password", views.ChangePasswordView.as_view(), name="change_password"),
-    path(
-        "password-reset/",
-        include("django_rest_passwordreset.urls", namespace="password_reset"),
-    ),
-]
-
-account_urls = [
-    # path("signup/", views.RegisterAPIView.as_view(), name="signup"),
-    # path('verify-email/<str:token>/', views.VerifyEmailView.as_view(), name='verify_email'),
-    # path('resend-verification/', views.ResendVerificationEmailView.as_view(), name='resend_verification'),
-    path(
-        "login/",
-        auth_views.LoginView.as_view(
-            template_name="account/login.html", authentication_form=forms.UserLoginForm
-        ),
-        name="login",
-    ),
-    # path("logout/", auth_views.LogoutView.as_view(), name="logout"),
-    path("logout/", views.LogoutView.as_view(), name="auth_logout"),
-]
-
-password_urls = [
-    # path("change-password/", views.ChangePassword.as_view(), name="change_password"),
-    path(
-        "password-reset/",
-        auth_views.PasswordResetView.as_view(
-            form_class=forms.CustomPasswordResetForm,
-            template_name="account/password/password_reset.html",
-            subject_template_name="account/password/password_reset_subject.txt",
-            email_template_name="account/password/password_reset_email.html",
-            from_email=settings.EMAIL_HOST_USER,
-            # success_url='/login/'
-        ),
-        name="password_reset",
-    ),
-    path(
-        "password-reset/done/",
-        auth_views.PasswordResetDoneView.as_view(
-            template_name="account/password/password_reset_done.html"
-        ),
-        name="password_reset_done",
-    ),
-    path(
-        "password-reset-confirm/<uidb64>/<token>/",
-        auth_views.PasswordResetConfirmView.as_view(
-            template_name="account/password/password_reset_confirm.html"
-        ),
-        name="password_reset_confirm",
-    ),
-    path(
-        "password-reset-complete/",
-        auth_views.PasswordResetCompleteView.as_view(
-            template_name="account/password/password_reset_complete.html"
-        ),
-        name="password_reset_complete",
-    ),
-]
-
-urlpatterns = admin_urls + jwt_urls + account_urls + password_urls + manual_tokens
-
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-urlpatterns += staticfiles_urlpatterns()
-
-
-# accounts/views.py
-import uuid
-from datetime import timedelta
-from typing import Any
-
-import jwt
-from django.conf import settings
-from django.contrib.auth import authenticate, login
-from django.core.mail import send_mail
-from django.http import JsonResponse
-from django.middleware.csrf import get_token
-from django.shortcuts import redirect
-from django.utils import timezone
-from django.utils.crypto import get_random_string
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters, generics, status, viewsets
-from rest_framework.exceptions import AuthenticationFailed
-from rest_framework.generics import GenericAPIView
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.request import Request
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken, TokenError
-
-from accounts.models import User, UserToken
-from accounts.pagination import CustomPageNumberPagination
-from accounts.serializers import (
-    ChangePasswordSerializer,
-    RegisterSerializer,
-    UserSerializer,
-)
-
-# from utils.email_utils import send_verification_email
-
-
-@method_decorator(ensure_csrf_cookie, name="dispatch")
-class GetCSRFToken(APIView):
-    def get(self, request):
-        csrf_token = get_token(request)
-        return JsonResponse({"success": "CSRF cookie set", "csrftoken": csrf_token})
-
-
-class GenerateTokenView(APIView):
-    """
-    Generate authentication token for phone number.
-
-    This endpoint generates a new token or retrieves an existing one for the provided phone number.
-    """
-
-    def post(self, request):
-        """
-        Generate token for authentication.
-
-        Parameters:
-            phone_number (str): User's phone number
-
-        Returns:
-            token (str): Generated authentication token
-
-        Raises:
-            400: If phone number is not provided
-        """
-        phone_number = request.data.get("phone_number")
-        if not phone_number:
-            return Response(
-                {"error": "Phone number is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        user_token, created = UserToken.objects.get_or_create(phone_number=phone_number)
-        return Response({"token": str(user_token.token)}, status=status.HTTP_200_OK)
-
-
-class TokenAuthenticationView(APIView):
-    """
-    Authenticate user using generated token.
-
-    This endpoint validates the token and returns JWT tokens for further authentication.
-    """
-
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def post(self, request):
-        """
-        Authenticate using token.
-
-        Parameters:
-            token (str): Authentication token previously generated
-
-        Returns:
-            refresh (str): JWT refresh token
-            access (str): JWT access token
-            message (str): Success message
-            user (dict): User details including id and phone
-
-        Raises:
-            400: If token is invalid or not provided
-        """
-        token = request.data.get("token")
-        if not token:
-            return Response(
-                {"error": "Token is required."}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            user_token = UserToken.objects.get(token=token)
-
-            # Get or create the user
-            user, created = User.objects.get_or_create(phone=user_token.phone_number)
-
-            # Generate JWT tokens with additional claims
-            refresh = RefreshToken.for_user(user)
-            refresh["phone"] = user.phone  # Add phone number to token claims
-            refresh["user_id"] = user.id  # Add the user_id claim
-            access_token = str(refresh.access_token)
-
-            return Response(
-                {
-                    "refresh": str(refresh),
-                    "access": access_token,
-                    "message": "Authenticated successfully.",
-                    "user": {"id": user.id, "phone": user.phone},
-                },
-                status=status.HTTP_200_OK,
-            )
-        except UserToken.DoesNotExist:
-            return Response(
-                {"error": "Invalid token."}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-
-class PhoneAuthenticationView(APIView):
-    def post(self, request):
-        phone_number = request.data.get("phone_number")
-        if not phone_number:
-            return Response(
-                {"error": "Phone number is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Best practice, send an OTP here
-        # For now, we'll authenticate directly (Note: This is not secure)
-        user, created = User.objects.get_or_create(phone=phone_number)
-
-        # Generate JWT tokens with additional claims
-        refresh = RefreshToken.for_user(user)
-        refresh["phone"] = user.phone  # Add phone number to token claims
-        access_token = str(refresh.access_token)
-
-        return Response(
-            {
-                "refresh": str(refresh),
-                "access": access_token,
-                "message": "Authenticated successfully.",
-                "user": {"id": user.id, "phone": user.phone},
-            },
-            status=status.HTTP_200_OK,
-        )
-
-
-class CheckAuthenticatedView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        print("This is the user: ", request.user.phone)
-        return Response({"message": "Authenticated"}, status=status.HTTP_200_OK)
-
-
-# class RegisterAPIView(GenericAPIView):
-#     """
-#     API endpoint that allows users to be created.
-
-#     Expected payload:
-#     {
-#         "password": "password",
-#         "first_name": "John",
-#         "last_name": "Doe",
-#         "email": "johndoe@example.com",
-#         "country": "NG"
-#     }
-#     """
-#     permission_classes = [AllowAny]
-#     authentication_classes = []
-#     serializer_class = RegisterSerializer
-
-#     def post(self, request: Request) -> Response:
-#         serializer = self.serializer_class(data=request.data)
-
-#         if serializer.is_valid():
-#             user = serializer.save()
-#             user.email_verified = False  # Set email_verified to False initially
-#             user.email_verification_token = get_random_string(64)
-#             user.save()
-
-#             # Send verification email
-#             verification_link = f"{settings.FRONTEND_BASE_URL}/verify-email/{user.email_verification_token}"
-#             email_response = send_verification_email(user.email, verification_link)
-
-#             if email_response.status_code == 200:
-#                 return Response({
-#                     "message": "User registered successfully. Please check your email to verify your account.",
-#                     "user_id": user.id
-#                 }, status=status.HTTP_201_CREATED)
-#             else:
-#                 return Response({
-#                     "message": "User registered successfully, but there was an issue sending the verification email. Please try again later.",
-#                     "user_id": user.id
-#                 }, status=status.HTTP_201_CREATED)
-#         else:
-#             print("Data not valid")
-#             errors = {}
-#             for field, field_errors in serializer.errors.items():
-#                 errors[field] = field_errors[0]  # Take the first error message for each field
-
-#             if 'email' in errors and 'unique' in errors['email'].lower():
-#                 errors['email'] = "A user with this email already exists."
-
-#             if 'password' in errors:
-#                 if 'too short' in errors['password'].lower():
-#                     errors['password'] = "Password is too short. It must be at least 8 characters long."
-#                 elif 'too common' in errors['password'].lower():
-#                     errors['password'] = "This password is too common. Please choose a more unique password."
-#                 elif 'entirely numeric' in errors['password'].lower():
-#                     errors['password'] = "Password cannot be entirely numeric."
-
-#             return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
-
-
-# class VerifyEmailView(APIView):
-#     def get(self, request, token):
-#         try:
-#             user = User.objects.get(email_verification_token=token)
-#             user.email_verified = True
-#             # user.email_verification_token = ''
-#             user.save()
-#             return Response({"message": "Email verified successfully"}, status=status.HTTP_200_OK)
-#         except User.DoesNotExist:
-#             return Response({"message": "Invalid token"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-# class ResendVerificationEmailView(APIView):
-#     def post(self, request):
-#         email = request.data.get('email')
-#         if not email:
-#             return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-#         try:
-#             user = User.objects.get(email=email)
-#             if user.email_verified:
-#                 return Response({"message": "Email is already verified"}, status=status.HTTP_400_BAD_REQUEST)
-
-#             user.email_verification_token = get_random_string(64)
-#             user.save()
-
-#             verification_link = f"{settings.FRONTEND_BASE_URL}/verify-email/{user.email_verification_token}"
-#             email_response = send_verification_email(user.email, verification_link)
-
-#             if email_response.status_code == 200:
-#                 return Response({"message": "Verification email resent successfully"}, status=status.HTTP_200_OK)
-#             else:
-#                 return Response({"message": "Failed to resend verification email"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#         except User.DoesNotExist:
-#             return Response({"error": "User with this email does not exist"}, status=status.HTTP_404_NOT_FOUND)
-
-
-class LoginView(APIView):
-    def post(self, request: Request) -> Response:
-        email = request.data.get("email")
-        password = request.data.get("password")
-
-        if not email:
-            return Response(
-                {"errors": {"email": ["Email is required"]}},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not password:
-            return Response(
-                {"errors": {"password": ["Password is required"]}},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        user = authenticate(email=email, password=password)
-
-        if user is not None:
-            if not user.email_verified:
-                return Response(
-                    {
-                        "errors": {
-                            "email": ["Please verify your email before logging in"]
-                        }
-                    },
-                    status=status.HTTP_401_UNAUTHORIZED,
-                )
-            refresh = RefreshToken.for_user(user)
-            return Response(
-                {
-                    "refresh": str(refresh),
-                    "access": str(refresh.access_token),
-                }
-            )
-
-        user_exists = User.objects.filter(email=email).exists()
-        if user_exists:
-            return Response(
-                {"errors": {"password": ["Invalid password"]}},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-        else:
-            return Response(
-                {"errors": {"email": ["No account found with this email"]}},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-
-class LogoutView(APIView):
-    permission_classes = (IsAuthenticated,)
-
-    def post(self, request):
-        try:
-            refresh_token = request.data.get("refresh_token")
-            if not refresh_token:
-                return Response(
-                    {"error": "Refresh token is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-            return Response(status=status.HTTP_205_RESET_CONTENT)
-        except TokenError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            print("This is the error", e)
-            return Response(
-                {"error": "An unexpected error occurred"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-
-class UserViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint that allows users to be viewed, edited and searched.
-    """
-
-    queryset = User.objects.exclude(is_superuser=True)
-    serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
-    pagination_class = CustomPageNumberPagination
-    filter_backends = [
-        DjangoFilterBackend,
-        filters.SearchFilter,
-        filters.OrderingFilter,
-    ]
-
-    lookup_field = "id"
-    filterset_fields = ["id", "username", "email"]
-    search_fields = ["id", "username", "email"]
-    ordering_fields = ["id", "username", "email"]
-
-
-class UserView(APIView):
-    def get(self, request: Request) -> Response:
-        token = request.COOKIES.get("jwt")
-
-        if not token:
-            raise AuthenticationFailed("Unauthenticated")
-
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        except jwt.ExpiredSignatureError:
-            raise AuthenticationFailed("Authentication Expired")
-
-        user = User.objects.filter(id=payload["id"]).first()
-        serializer = UserSerializer(user)
-        return Response(serializer.data)
-
-
-class CurrentUserDetailView(APIView):
-    """
-    An endpoint to get the current logged in users' details.
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        serializer = UserSerializer(request.user)
-        return Response(serializer.data)
-
-
-class ChangePasswordView(generics.UpdateAPIView):
-    """
-    An endpoint for changing password.
-    """
-
-    serializer_class = ChangePasswordSerializer
-    model = User
-    permission_classes = (IsAuthenticated,)
-
-    def get_object(self, queryset=None):
-        return self.request.user
-
-    def update(self, request, *args, **kwargs):
-        self.object = self.get_object()
-        serializer = self.get_serializer(data=request.data)
-
-        if serializer.is_valid():
-            # Check old password
-            if not self.object.check_password(serializer.data.get("old_password")):
-                return Response(
-                    {"old_password": ["Wrong password."]},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            # set_password also hashes the password that the user will get
-            self.object.set_password(serializer.data.get("new_password"))
-            self.object.save()
-
-            response = {
-                "status": "success",
-                "code": status.HTTP_200_OK,
-                "message": "Password updated successfully",
-            }
-
-            return Response(response)
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-# accounts/management/__init__.py
-
-
-# accounts/management/commands/__init__.py
-
-
-# accounts/management/commands/populate_db.py
-from typing import Any
-
-from django.conf import settings
-from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
-from django.db import IntegrityError
-
-# from accounts.factories import OrganizationProfileFactory, UserFactory
-
-
-class Command(BaseCommand):
-    help = "Populates the database with dummy data"
-
-    def handle(self, *args: Any, **options: Any) -> None:
-        User = get_user_model()
-
-        # Set your custom superuser data
-        username: str = settings.ADMIN_USERNAME
-        email: str = settings.ADMIN_EMAIL
-        phone: str = settings.ADMIN_PHONE
-
-        password: str = settings.ADMIN_PASSWORD
-
-        try:
-            # Attempt to create a new superuser
-            User.objects.create_superuser(
-                username=username, phone=phone, email=email, password=password
-            )
-            self.stdout.write(
-                self.style.SUCCESS(f"Superuser {phone} created successfully")
-            )
-        except IntegrityError:
-            self.stdout.write(self.style.WARNING(f"Superuser {phone} already exists"))
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f"An error occurred: {str(e)}"))
-
-        # # Create Users
-        # for _ in range(10):
-        #     UserFactory.create()
-
-        # # Create Organization Profiles
-        # for _ in range(5):
-        #     OrganizationProfileFactory.create()
-
-        # # ... create other objects
-
-        self.stdout.write(
-            self.style.SUCCESS("Successfully populated the database with dummy data")
-        )
-
-
-# backup/models.py
 from django.db import models
 from simple_history.models import HistoricalRecords
 
 from helpers.models import TrackingModel
+from pabackup_service.config.logging_config import configure_logger
+
+logger = configure_logger(__name__)
 
 ANALYSIS_SOURCE = [("email", "Email"), ("original", "Original")]
 
 
 class Property(models.Model):
     """
-    Backup copy of a property record.
+    Copy of a property record.
     """
 
     primary_key = models.IntegerField(unique=True)
@@ -1055,13 +44,17 @@ class Property(models.Model):
     analysis_source = models.CharField(
         max_length=20, choices=ANALYSIS_SOURCE, default="original"
     )
+    updated_at = models.DateTimeField(auto_now=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_properties")
+
+    class Meta:
+        db_table = "sdb_properties"
+        verbose_name = "Property Data"
+        verbose_name_plural = "Property Data Records"
 
     def __str__(self):
         return f"Property {self.primary_key} - {self.address or 'No Address'}"
-
-    updated_at = models.DateTimeField(auto_now=True)
 
 
 class AnalysisTask(models.Model):
@@ -1075,7 +68,12 @@ class AnalysisTask(models.Model):
     trigger_analysis = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_analysis_tasks")
+
+    class Meta:
+        db_table = "sdb_analysis_tasks"
+        verbose_name = "Analysis Task"
+        verbose_name_plural = "Analysis Tasks"
 
     def __str__(self):
         return (
@@ -1095,221 +93,330 @@ class ScrapingJob(models.Model):
     task_id = models.IntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        db_table = "sdb_scraping_jobs"
+        verbose_name = "Scraping Job"
+        verbose_name_plural = "Scraping Jobs"
+
 
 # === Floorplan Models ===
 
 
-# Mimic floorplan/models.py: FloorPlanAnalysisResult
 class FloorPlanAnalysisResult(TrackingModel):
     message = models.CharField(max_length=255)
     user_id = models.CharField(max_length=255)
     property_id = models.CharField(max_length=255)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_analysis_results")
 
     class Meta:
-        # --- ADD THIS CONSTRAINT ---
+        db_table = "sdb_fp_analysis_results"
         unique_together = ("user_id", "property_id")
-        # --------------------------
         indexes = [
             models.Index(fields=["user_id", "property_id"]),
         ]
+        verbose_name = "Floor Plan Analysis Result"
         verbose_name_plural = "Floor Plan Analysis Results"
 
     def __str__(self):
         return f"Analysis: {self.user_id} - {self.property_id} (ID: {self.id})"
 
 
-# Mimic FloorPlan model
 class FloorPlan(TrackingModel):
     analysis_result = models.ForeignKey(
         FloorPlanAnalysisResult,
-        related_name="backup_floor_plans",
+        related_name="sdb_floor_plans",
         on_delete=models.CASCADE,
     )
-    floorplan_id = models.CharField(max_length=255)
-    original_url = models.URLField()
+    floorplan_id = models.CharField(
+        max_length=64,
+        db_index=True,  # unique=True,
+    )  # Ensures DB-level uniqueness and speeds up lookups
+    original_url = models.URLField(max_length=1024)
+    update_count = models.PositiveIntegerField(
+        default=0, help_text="Number of times webhook processing updated this record."
+    )
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_floorplans")
 
     class Meta:
+        db_table = "sdb_floorplans"
         unique_together = ("analysis_result", "floorplan_id")
-        # --------------------------
         indexes = [
             models.Index(
                 fields=["floorplan_id"]
             ),  # Can keep this index too if needed for other lookups
             # The unique_together constraint often implies an index anyway
         ]
+        verbose_name = "Floor Plan"
         verbose_name_plural = "Floor Plans"
 
     def __str__(self):
-        return f"FloorPlan: {self.floorplan_id} (AnalysisID: {self.analysis_result_id})"
+        # Show first 8 chars of hash for brevity in admin dropdowns etc.
+        short_hash = self.floorplan_id[:8] if self.floorplan_id else "N/A"
+        return f"FP Hash: {short_hash}... (Analysis: {self.analysis_result_id})"
+
+    @staticmethod
+    def generate_hash_id(property_id, user_id, url):
+        """
+        Generates a SHA-256 hash for the combination of property ID, user ID,
+        and URL string.
+        """
+        if not all([property_id, user_id, url]):  # Ensure all parts are non-empty
+            raise ValueError(
+                "Cannot generate hash: property_id, user_id, and url must all be provided and non-empty."
+            )
+
+        try:
+            # Combine the strings with a separator unlikely to appear in the inputs
+            combined_string = f"{property_id}|{user_id}|{url}"
+            string_bytes = combined_string.encode("utf-8")
+            return hashlib.sha256(string_bytes).hexdigest()
+        except Exception as e:
+            logger.error(
+                f"Error generating combined hash for '{property_id}|{user_id}|{url}': {e}"
+            )
+            raise ValueError(f"Hashing failed for combined input") from e
 
 
-# Mimic AllFloorsData model
 class AllFloorsData(TrackingModel):
     floor_plan = models.OneToOneField(
-        FloorPlan, related_name="backup_all_floors_data", on_delete=models.CASCADE
+        FloorPlan, related_name="sdb_all_floors_data", on_delete=models.CASCADE
     )
-    json_file_url = models.URLField()
-    csv_url = models.URLField()  # change to all_floors_csv_url
-    total_area_csv_url = models.URLField()
-    image_labelme_side_by_side_url = models.URLField()
-    notes = models.TextField(blank=True, null=True)
+    json_file_url = models.URLField(max_length=1024, null=True, blank=True)
+    csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    total_area_csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    image_labelme_side_by_side_url = models.URLField(
+        max_length=1024, null=True, blank=True
+    )
+    notes = models.TextField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_all_floors_data")
+
+    class Meta:
+        db_table = "sdb_fp_all_floors_data"
 
     def __str__(self):
-        return f"Backup All Floors Data for {self.floor_plan.floorplan_id}"
+        fp_id = self.floor_plan.floorplan_id if self.floor_plan else "N/A"
+        return f"All Floors Data for {fp_id}"
 
 
-# Mimic PlanFloor model
 class PlanFloor(TrackingModel):
     floor_plan = models.ForeignKey(
-        FloorPlan, related_name="backup_plan_floors", on_delete=models.CASCADE
+        FloorPlan, related_name="sdb_plan_floors", on_delete=models.CASCADE
     )
-    floor = models.CharField(max_length=255)
-    label_me_url = models.URLField()
-    json_file_url = models.URLField()
-    image_url = models.URLField()
-    labelme_image_url = models.URLField()
-    csv_url = models.URLField()
-    image_side_by_side_url = models.URLField()
+    floor = models.CharField(max_length=255)  # e.g., "first_floor" or "ground_floor"
+    label_me_url = models.URLField(max_length=1024, null=True, blank=True)
+    json_file_url = models.URLField(max_length=1024, null=True, blank=True)
+    image_url = models.URLField(max_length=1024, null=True, blank=True)
+    labelme_image_url = models.URLField(max_length=1024, null=True, blank=True)
+    csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    image_side_by_side_url = models.URLField(max_length=1024, null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_plan_floors")
+
+    class Meta:
+        db_table = "sdb_fp_plan_floors"
 
     def __str__(self):
-        return f"{self.floor} - {self.floor_plan.floorplan_id}"
+        fp_id = self.floor_plan.floorplan_id if self.floor_plan else "N/A"
+        return f"{self.floor} - {fp_id}"
 
 
-# Mimic CsvFloor model
 class CsvFloor(TrackingModel):  # AllFloorsCsvfloor
     all_floors_data = models.ForeignKey(
-        AllFloorsData, related_name="backup_csv_floors", on_delete=models.CASCADE
+        AllFloorsData, related_name="sdb_csv_floors", on_delete=models.CASCADE
     )
     floor_name = models.CharField(max_length=100, null=True, blank=True)
     calculated_total_area_metric = models.FloatField(null=True, blank=True)
     calculated_total_area_imperial = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_floors")
+
+    class Meta:
+        db_table = "sdb_fp_csv_floors"
 
     def __str__(self):
-        return self.floor_name
+        # Handle potential None for floor_name
+        return self.floor_name or f"Unnamed Floor (ID: {self.id})"
 
 
 # Mimic CsvRoom model
 class CsvRoom(TrackingModel):
     csv_floor = models.ForeignKey(  # should be csv_floor
-        CsvFloor, on_delete=models.CASCADE, related_name="backup_rooms"
+        CsvFloor, on_delete=models.CASCADE, related_name="sdb_rooms"
     )
     room_name = models.CharField(max_length=100, null=True, blank=True)
     is_segment = models.CharField(max_length=50, null=True, blank=True)
-    room_id = models.FloatField(null=True, blank=True)
+    room_id = models.FloatField(
+        null=True, blank=True, db_index=True  # Index room_id within a floor
+    )
     no_of_doors = models.FloatField(null=True, blank=True)
     no_of_windows = models.FloatField(null=True, blank=True)
     no_of_room_points = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_rooms")
+
+    class Meta:
+        db_table = "sdb_fp_csv_rooms"
 
     def __str__(self):
-        return f"{self.room_name} ({self.floor.floor_name})"
+        try:
+            floor_name = self.csv_floor.floor_name or "Unnamed Floor"
+        except CsvFloor.DoesNotExist:
+            floor_name = "Detached Floor"
+        room_name = self.room_name or f"Unnamed Room (ID: {self.id})"
+        return f"{room_name} ({floor_name})"
 
 
-# Mimic CsvRoomPixelData model
 class CsvRoomPixelData(TrackingModel):
     csv_room = models.OneToOneField(
-        CsvRoom, on_delete=models.CASCADE, related_name="backup_pixel_data"
+        CsvRoom, on_delete=models.CASCADE, related_name="sdb_pixel_data"
     )
-    min_x_pixels = models.FloatField(null=True, blank=True)
-    min_y_pixels = models.FloatField(null=True, blank=True)
-    max_x_pixels = models.FloatField(null=True, blank=True)
-    max_y_pixels = models.FloatField(null=True, blank=True)
-    max_area_pixels = models.FloatField(null=True, blank=True)
-    actual_area_pixels = models.FloatField(null=True, blank=True)
-    pixel_ratio = models.FloatField(null=True, blank=True)
+    # Numeric fields from CSV for pixel positions and areas:
+    min_x_pixels = models.FloatField(null=True, blank=True)  # Min X Pixels
+    min_y_pixels = models.FloatField(null=True, blank=True)  # Min Y Pixels
+    max_x_pixels = models.FloatField(null=True, blank=True)  # Max X Pixels
+    max_y_pixels = models.FloatField(null=True, blank=True)  # Max Y Pixels
+    max_area_pixels = models.FloatField(null=True, blank=True)  # Max Area Pixels
+    actual_area_pixels = models.FloatField(null=True, blank=True)  # Actual Area Pixels
+    pixel_ratio = models.FloatField(null=True, blank=True)  # Pixel ratio
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_room_pixel_data")
+
+    class Meta:
+        db_table = "sdb_fp_csv_room_pixel_data"
 
     def __str__(self):
-        return f"Backup Pixel Data for {self.room.room_name}"
+        try:
+            room_name = self.csv_room.room_name or f"Unnamed Room (ID: {self.room.id})"
+            return f"Pixel Data for {room_name}"
+        except CsvRoom.DoesNotExist:
+            return f"Pixel Data for Detached Room (ID: {self.id})"
 
 
-# Mimic CsvRoomDimensions model
 class CsvRoomDimensions(TrackingModel):
     csv_room = models.OneToOneField(
-        CsvRoom, on_delete=models.CASCADE, related_name="backup_dimensions"
+        CsvRoom, on_delete=models.CASCADE, related_name="sdb_dimensions"
     )
+    # Text fields for dimensions (Handles 'Unknown')
     dimensions_imperial = models.CharField(max_length=100, null=True, blank=True)
     dimensions_metric = models.CharField(max_length=100, null=True, blank=True)
+
+    # Numeric fields for maximum areas
     max_area_metric = models.FloatField(null=True, blank=True)
     max_area_imperial = models.FloatField(null=True, blank=True)
-    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
-    calculated_floor_total_sq_area_metric = models.FloatField(null=True, blank=True)
-    calculated_area_imperial = models.FloatField(null=True, blank=True)
-    calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    # Numeric fields for calculated areas:
+    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
+    calculated_area_imperial = models.FloatField(null=True, blank=True)
+
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_room_dimensions")
+
+    class Meta:
+        db_table = "sdb_fp_csv_room_dimensions"
 
     def __str__(self):
-        return f"Backup Dimensions for {self.room.room_name}"
+        try:
+            room_name = self.csv_room.room_name or f"Unnamed Room (ID: {self.room.id})"
+            return f"Dimensions for {room_name}"
+        except CsvRoom.DoesNotExist:
+            return f"Dimensions for Detached Room (ID: {self.id})"
 
 
-# Mimic CsvRoomScalingFactors model
 class CsvRoomScalingFactors(TrackingModel):
     csv_room = models.OneToOneField(
-        CsvRoom, on_delete=models.CASCADE, related_name="backup_scaling_factors"
+        CsvRoom, on_delete=models.CASCADE, related_name="sdb_scaling_factors"
     )
     scale_metric = models.FloatField(null=True, blank=True)
     scale_imperial = models.FloatField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_fp_csv_room_scaling_factors")
+
+    class Meta:
+        db_table = "sdb_fp_csv_room_scaling_factors"
 
     def __str__(self):
-        return f"Backup Scaling Factors for {self.room.room_name}"
+        try:
+            room_name = self.csv_room.room_name or f"Unnamed Room (ID: {self.room.id})"
+            return f"Scaling Factors for {room_name}"
+        except CsvRoom.DoesNotExist:
+            return f"Scaling Factors for Detached Room (ID: {self.id})"
 
 
-# Mimic AllFloorsCsvRawRow model
-class AllFloorsCsvRawRow(TrackingModel):
+class AllFloorsCsvData(TrackingModel):
     """Stores a raw representation of a single row from all_floors.csv."""
 
     all_floors_data = models.ForeignKey(
         AllFloorsData,
         on_delete=models.CASCADE,
-        related_name="backup_all_floors_raw_rows",
+        related_name="all_floors_csv_data",
     )
-    # Match fields from floorplan service's AllFloorsCsvRawRow model
+
+    # --- Fields matching CSV columns ---
+    # Object/String Columns
     floor_name = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     room_name = models.CharField(max_length=100, null=True, blank=True)
     is_segment = models.CharField(max_length=50, null=True, blank=True)
     dimensions_imperial = models.CharField(max_length=100, null=True, blank=True)
     dimensions_metric = models.CharField(max_length=100, null=True, blank=True)
+
+    # Float64/Numeric Columns
     room_id = models.FloatField(null=True, blank=True, db_index=True)
     no_of_door = models.FloatField(null=True, blank=True)
     no_of_window = models.FloatField(null=True, blank=True)
     no_of_room_points = models.FloatField(null=True, blank=True)
-    min_x_pixels = models.FloatField(null=True, blank=True)
-    min_y_pixels = models.FloatField(null=True, blank=True)
-    max_x_pixels = models.FloatField(null=True, blank=True)
-    max_y_pixels = models.FloatField(null=True, blank=True)
-    max_area_metric = models.FloatField(null=True, blank=True)
-    max_area_imperial = models.FloatField(null=True, blank=True)
-    max_area_pixels = models.FloatField(null=True, blank=True)
-    actual_area_pixels = models.FloatField(null=True, blank=True)
-    pixel_ratio = models.FloatField(null=True, blank=True)
-    scale_metric = models.FloatField(null=True, blank=True)
-    scale_imperial = models.FloatField(null=True, blank=True)
-    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
-    calculated_floor_total_sq_area_metric = models.FloatField(null=True, blank=True)
-    calculated_area_imperial = models.FloatField(null=True, blank=True)
-    calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
-    # Add other fields if they exist in the source model/CSV (e.g., the numbered columns)
 
-    history = HistoricalRecords()
+    min_x_pixels = models.FloatField(
+        null=True, blank=True, db_column="min_x_pixels_csv"
+    )  # Use db_column if name conflicts/desired
+    min_y_pixels = models.FloatField(
+        null=True, blank=True, db_column="min_y_pixels_csv"
+    )
+    max_x_pixels = models.FloatField(
+        null=True, blank=True, db_column="max_x_pixels_csv"
+    )
+    max_y_pixels = models.FloatField(
+        null=True, blank=True, db_column="max_y_pixels_csv"
+    )
+    max_area_metric = models.FloatField(
+        null=True, blank=True, db_column="max_area_metric_csv"
+    )
+    max_area_imperial = models.FloatField(
+        null=True, blank=True, db_column="max_area_imperial_csv"
+    )
+    max_area_pixels = models.FloatField(
+        null=True, blank=True, db_column="max_area_pixels_csv"
+    )
+    actual_area_pixels = models.FloatField(
+        null=True, blank=True, db_column="actual_area_pixels_csv"
+    )
+    pixel_ratio = models.FloatField(null=True, blank=True, db_column="pixel_ratio_csv")
+    scale_metric = models.FloatField(
+        null=True, blank=True, db_column="scale_metric_csv"
+    )
+    scale_imperial = models.FloatField(
+        null=True, blank=True, db_column="scale_imperial_csv"
+    )
+    calculated_sq_area_metric = models.FloatField(
+        null=True, blank=True, db_column="calculated_sq_area_metric_csv"
+    )
+    calculated_floor_total_sq_area_metric = models.FloatField(
+        null=True, blank=True, db_column="calc_floor_total_metric_csv"
+    )
+    calculated_area_imperial = models.FloatField(
+        null=True, blank=True, db_column="calculated_area_imperial_csv"
+    )  # Note lowercase 'c'
+    calculated_floor_total_sq_area_imperial = models.FloatField(
+        null=True, blank=True, db_column="calc_floor_total_imperial_csv"
+    )
+
+    history = HistoricalRecords(table_name="history_sdb_all_floors_csv_data")
 
     class Meta:
-        verbose_name = "All Floors CSV Raw Row"
-        verbose_name_plural = "All Floors CSV Raw Rows"
+        db_table = "sdb_all_floors_csv_data"
+        verbose_name = "All Floors CSV Data"
+        verbose_name_plural = "All Floors CSV Data"
         indexes = [
             models.Index(fields=["all_floors_data", "floor_name"]),
             models.Index(fields=["all_floors_data", "room_id"]),
@@ -1322,12 +429,11 @@ class AllFloorsCsvRawRow(TrackingModel):
         )
 
 
-# Mimic TotalAreaData model
-class TotalAreaData(TrackingModel):
-    """Stores parsed data from the total_area.csv file (backup)."""
+class TotalAreasCsvData(TrackingModel):
+    """Stores parsed data from the total_area.csv file."""
 
     all_floors_data = models.ForeignKey(
-        AllFloorsData, related_name="backup_total_area_data", on_delete=models.CASCADE
+        AllFloorsData, related_name="total_areas_csv_data", on_delete=models.CASCADE
     )
     area_name = models.CharField(max_length=500, null=True, blank=True)
     square_meters = models.FloatField(null=True, blank=True)
@@ -1348,12 +454,13 @@ class TotalAreaData(TrackingModel):
     input_text_tokens = models.IntegerField(null=True, blank=True)
     output_text_tokens = models.IntegerField(null=True, blank=True)
 
-    history = HistoricalRecords()
+    history = HistoricalRecords(table_name="history_sdb_total_areas_csv_data")
 
     class Meta:
+        db_table = "sdb_total_areas_csv_data"
         unique_together = ("all_floors_data", "area_name")
-        verbose_name = "Total Area Data"
-        verbose_name_plural = "Total Area Data"
+        verbose_name = "Total Area CSV Data"
+        verbose_name_plural = "Total Area CSV Data"
 
     def __str__(self):
         afd_id = (
@@ -1364,12 +471,14 @@ class TotalAreaData(TrackingModel):
         return f"{self.area_name or 'Unnamed Area'} for FloorPlan: {afd_id}"
 
 
-# backup/serializers.py
+# sdb/serializers.py
 from django.db import transaction
 from rest_framework import serializers
 
-from backup.models import (
-    AllFloorsCsvRawRow,
+# Use standard logging or your custom config
+from pabackup_service.config.logging_config import configure_logger
+from sdb.models import (
+    AllFloorsCsvData,
     AllFloorsData,
     AnalysisTask,
     CsvFloor,
@@ -1382,11 +491,8 @@ from backup.models import (
     PlanFloor,
     Property,
     ScrapingJob,
-    TotalAreaData,
+    TotalAreasCsvData,
 )
-
-# Use standard logging or your custom config
-from pabackup_service.config.logging_config import configure_logger
 
 logger = configure_logger(__name__)
 
@@ -1433,7 +539,7 @@ class ScrapingJobSerializer(serializers.ModelSerializer):
         )
 
 
-# ––––––– Serializers for Nested Backup Data –––––––
+# ––––––– Serializers for Nested sdb Data –––––––
 
 # --- Leaf Node Serializers (Define these first) ---
 
@@ -1456,9 +562,9 @@ class CsvRoomScalingFactorsSerializer(serializers.ModelSerializer):
         exclude = ("csv_room", "id", "created_at", "updated_at")
 
 
-class AllFloorsCsvRawRowSerializer(serializers.ModelSerializer):
+class AllFloorsCsvDataSerializer(serializers.ModelSerializer):
     class Meta:
-        model = AllFloorsCsvRawRow
+        model = AllFloorsCsvData
         fields = [
             "floor_name",
             "room_name",
@@ -1488,13 +594,13 @@ class AllFloorsCsvRawRowSerializer(serializers.ModelSerializer):
         ]
 
 
-class TotalAreaDataSerializer(serializers.ModelSerializer):
+class TotalAreasCsvDataSerializer(serializers.ModelSerializer):
     class Meta:
-        model = TotalAreaData
+        model = TotalAreasCsvData
         exclude = ("all_floors_data", "id", "created_at", "updated_at")
 
 
-# --- Serializers used DIRECTLY by CompleteBackupFloorPlanSerializer (Define Before It) ---
+# --- Serializers used DIRECTLY by CompletesdbFloorPlanSerializer (Define Before It) ---
 # Moved FloorPlanAnalysisResultSerializer UP
 class FloorPlanAnalysisResultSerializer(serializers.ModelSerializer):
     class Meta:
@@ -1519,9 +625,9 @@ class PlanFloorSerializer(serializers.ModelSerializer):
 
 
 class CsvRoomSerializer(serializers.ModelSerializer):
-    backup_pixel_data = CsvRoomPixelDataSerializer(required=False, allow_null=True)
-    backup_dimensions = CsvRoomDimensionsSerializer(required=False, allow_null=True)
-    backup_scaling_factors = CsvRoomScalingFactorsSerializer(
+    sdb_pixel_data = CsvRoomPixelDataSerializer(required=False, allow_null=True)
+    sdb_dimensions = CsvRoomDimensionsSerializer(required=False, allow_null=True)
+    sdb_scaling_factors = CsvRoomScalingFactorsSerializer(
         required=False, allow_null=True
     )
 
@@ -1531,21 +637,21 @@ class CsvRoomSerializer(serializers.ModelSerializer):
 
 
 class CsvFloorSerializer(serializers.ModelSerializer):
-    backup_rooms = CsvRoomSerializer(many=True, required=False, default=[])
+    sdb_rooms = CsvRoomSerializer(many=True, required=False, default=[])
 
     class Meta:
         model = CsvFloor
         exclude = ("all_floors_data", "id", "created_at", "updated_at")
 
 
-# --- AllFloorsDataSerializer (Define Before CompleteBackupFloorPlanSerializer) ---
+# --- AllFloorsDataSerializer (Define Before CompletesdbFloorPlanSerializer) ---
 class AllFloorsDataSerializer(serializers.ModelSerializer):
     # Nested serializers for write operations
-    backup_csv_floors = CsvFloorSerializer(many=True, required=False, default=[])
-    backup_all_floors_raw_rows = AllFloorsCsvRawRowSerializer(
+    sdb_csv_floors = CsvFloorSerializer(many=True, required=False, default=[])
+    all_floors_csv_data = AllFloorsCsvDataSerializer(
         many=True, required=False, default=[]
     )
-    backup_total_area_data = TotalAreaDataSerializer(
+    total_areas_csv_data = TotalAreasCsvDataSerializer(
         many=True, required=False, default=[]
     )
 
@@ -1556,9 +662,9 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Creates AllFloorsData and all its nested children."""
         # ... (create logic remains the same as before) ...
-        backup_csv_floors_data = validated_data.pop("backup_csv_floors", [])
-        backup_raw_rows_data = validated_data.pop("backup_all_floors_raw_rows", [])
-        backup_total_area_data = validated_data.pop("backup_total_area_data", [])
+        sdb_csv_floors_data = validated_data.pop("sdb_csv_floors", [])
+        sdb_raw_rows_data = validated_data.pop("all_floors_csv_data", [])
+        total_areas_csv_data = validated_data.pop("total_areas_csv_data", [])
 
         all_floors_data_instance = AllFloorsData.objects.create(**validated_data)
         logger.debug(
@@ -1566,8 +672,8 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
         )
 
         # --- Create Nested CsvFloor -> CsvRoom -> Details ---
-        for csv_floor_data in backup_csv_floors_data:
-            backup_rooms_data = csv_floor_data.pop("backup_rooms", [])
+        for csv_floor_data in sdb_csv_floors_data:
+            sdb_rooms_data = csv_floor_data.pop("sdb_rooms", [])
             csv_floor_instance = CsvFloor.objects.create(
                 all_floors_data=all_floors_data_instance, **csv_floor_data
             )
@@ -1580,10 +686,10 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
             dimensions_data_to_create_map = {}
             scaling_factors_to_create_map = {}
 
-            for idx, room_data in enumerate(backup_rooms_data):
-                pixel_data = room_data.pop("backup_pixel_data", None)
-                dimensions_data = room_data.pop("backup_dimensions", None)
-                scaling_factors_data = room_data.pop("backup_scaling_factors", None)
+            for idx, room_data in enumerate(sdb_rooms_data):
+                pixel_data = room_data.pop("sdb_pixel_data", None)
+                dimensions_data = room_data.pop("sdb_dimensions", None)
+                scaling_factors_data = room_data.pop("sdb_scaling_factors", None)
 
                 room_instance = CsvRoom(csv_floor=csv_floor_instance, **room_data)
                 rooms_to_create.append(room_instance)
@@ -1636,21 +742,21 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
                     f"    Bulk created related data for {len(created_rooms)} rooms."
                 )
 
-        # --- Bulk Create AllFloorsCsvRawRow ---
+        # --- Bulk Create AllFloorsCsvData ---
         raw_rows_to_create = [
-            AllFloorsCsvRawRow(all_floors_data=all_floors_data_instance, **raw_row_data)
-            for raw_row_data in backup_raw_rows_data
+            AllFloorsCsvData(all_floors_data=all_floors_data_instance, **raw_row_data)
+            for raw_row_data in sdb_raw_rows_data
         ]
         if raw_rows_to_create:
-            AllFloorsCsvRawRow.objects.bulk_create(raw_rows_to_create)
+            AllFloorsCsvData.objects.bulk_create(raw_rows_to_create)
             logger.debug(
-                f"  Bulk created {len(raw_rows_to_create)} AllFloorsCsvRawRow instances."
+                f"  Bulk created {len(raw_rows_to_create)} AllFloorsCsvData instances."
             )
 
-        # --- Create/Update TotalAreaData ---
+        # --- Create/Update TotalAreasCsvData ---
         total_area_instances = []
-        for ta_data in backup_total_area_data:
-            ta_instance, created = TotalAreaData.objects.update_or_create(
+        for ta_data in total_areas_csv_data:
+            ta_instance, created = TotalAreasCsvData.objects.update_or_create(
                 all_floors_data=all_floors_data_instance,
                 area_name=ta_data.get("area_name"),
                 defaults=ta_data,
@@ -1658,7 +764,7 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
             total_area_instances.append(ta_instance)
         if total_area_instances:
             logger.debug(
-                f"  Created/Updated {len(total_area_instances)} TotalAreaData instances."
+                f"  Created/Updated {len(total_area_instances)} TotalAreasCsvData instances."
             )
 
         return all_floors_data_instance
@@ -1667,11 +773,11 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
 # ––––––– Top Level Serializer (Define Last, as it uses others) –––––––
 
 
-class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
+class CompletesdbFloorPlanSerializer(serializers.ModelSerializer):
     # Nested serializers required for processing the input payload
     analysis_result = FloorPlanAnalysisResultSerializer()
-    backup_all_floors_data = AllFloorsDataSerializer(required=False, allow_null=True)
-    backup_plan_floors = PlanFloorSerializer(many=True, required=False, default=[])
+    sdb_all_floors_data = AllFloorsDataSerializer(required=False, allow_null=True)
+    sdb_plan_floors = PlanFloorSerializer(many=True, required=False, default=[])
 
     class Meta:
         model = FloorPlan
@@ -1679,8 +785,8 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
             "analysis_result",
             "floorplan_id",
             "original_url",
-            "backup_all_floors_data",
-            "backup_plan_floors",
+            "sdb_all_floors_data",
+            "sdb_plan_floors",
             "id",
             "created_at",
             "updated_at",
@@ -1689,16 +795,14 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        """Handles creation or update of a FloorPlan backup and its entire nested structure."""
+        """Handles creation or update of a FloorPlan and its entire nested structure."""
         # ... (create logic remains the same as before) ...
         analysis_result_data = validated_data.pop("analysis_result")
-        backup_all_floors_data_payload = validated_data.pop(
-            "backup_all_floors_data", None
-        )
-        backup_plan_floors_payload = validated_data.pop("backup_plan_floors", [])
+        sdb_all_floors_data_payload = validated_data.pop("sdb_all_floors_data", None)
+        sdb_plan_floors_payload = validated_data.pop("sdb_plan_floors", [])
         floorplan_lookup_id = validated_data.get("floorplan_id")
         logger.info(
-            f"Processing backup create/update for floorplan_id: {floorplan_lookup_id}"
+            f"Processing sdb create/update for floorplan_id: {floorplan_lookup_id}"
         )
 
         analysis_result_instance, created_ar = (
@@ -1727,44 +831,44 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
             )
             try:
                 if (
-                    hasattr(floorplan_instance, "backup_all_floors_data")
-                    and floorplan_instance.backup_all_floors_data
+                    hasattr(floorplan_instance, "sdb_all_floors_data")
+                    and floorplan_instance.sdb_all_floors_data
                 ):
                     logger.debug(
-                        f"Deleting existing AllFloorsData ID: {floorplan_instance.backup_all_floors_data.id}"
+                        f"Deleting existing AllFloorsData ID: {floorplan_instance.sdb_all_floors_data.id}"
                     )
-                    floorplan_instance.backup_all_floors_data.delete()
+                    floorplan_instance.sdb_all_floors_data.delete()
             except AllFloorsData.DoesNotExist:
                 logger.debug("No existing AllFloorsData found to delete.")
 
-            deleted_pf_count, _ = floorplan_instance.backup_plan_floors.all().delete()
+            deleted_pf_count, _ = floorplan_instance.sdb_plan_floors.all().delete()
             logger.debug(f"Deleted {deleted_pf_count} existing PlanFloor instances.")
             logger.info(
                 f"Finished deleting old nested data for FloorPlan {floorplan_lookup_id}."
             )
 
-        if backup_all_floors_data_payload:
+        if sdb_all_floors_data_payload:
             logger.debug(
                 f"Creating new AllFloorsData structure for FloorPlan {floorplan_lookup_id}..."
             )
             all_floors_serializer = AllFloorsDataSerializer(
-                data=backup_all_floors_data_payload
+                data=sdb_all_floors_data_payload
             )
             all_floors_serializer.is_valid(raise_exception=True)
             all_floors_serializer.save(floor_plan=floorplan_instance)
             logger.debug(f"Successfully created new AllFloorsData structure.")
         else:
             logger.debug(
-                "No 'backup_all_floors_data' provided in payload, skipping creation."
+                "No 'sdb_all_floors_data' provided in payload, skipping creation."
             )
 
-        if backup_plan_floors_payload:
+        if sdb_plan_floors_payload:
             logger.debug(
-                f"Creating {len(backup_plan_floors_payload)} new PlanFloor instances..."
+                f"Creating {len(sdb_plan_floors_payload)} new PlanFloor instances..."
             )
             plan_floors_to_create = [
                 PlanFloor(floor_plan=floorplan_instance, **pf_data)
-                for pf_data in backup_plan_floors_payload
+                for pf_data in sdb_plan_floors_payload
             ]
             if plan_floors_to_create:
                 PlanFloor.objects.bulk_create(plan_floors_to_create)
@@ -1772,44 +876,40 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
                     f"Bulk created {len(plan_floors_to_create)} PlanFloor instances."
                 )
         else:
-            logger.debug(
-                "No 'backup_plan_floors' provided in payload, skipping creation."
-            )
+            logger.debug("No 'sdb_plan_floors' provided in payload, skipping creation.")
 
-        logger.info(
-            f"Finished processing backup for floorplan_id: {floorplan_lookup_id}"
-        )
+        logger.info(f"Finished processing sdb for floorplan_id: {floorplan_lookup_id}")
         return floorplan_instance
 
     def update(self, instance, validated_data):
         logger.warning(
-            "Direct call to CompleteBackupFloorPlanSerializer.update() is not the intended flow for create-or-replace logic."
+            "Direct call to CompletesdbFloorPlanSerializer.update() is not the intended flow for create-or-replace logic."
         )
         raise NotImplementedError(
             "Update logic is handled within the create method for create-or-replace behavior."
         )
 
 
-# backup/__init__.py
+# sdb/__init__.py
 
 
-# backup/apps.py
+# sdb/apps.py
 from django.apps import AppConfig
 
 
-class BackupConfig(AppConfig):
+class SdbConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "backup"
+    name = "sdb"
 
 
-# backup/admin.py
+# sdb/admin.py
 from django.contrib import admin
 from django.contrib.admin import SimpleListFilter
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html
 
-from backup.models import (
-    AllFloorsCsvRawRow,
+from sdb.models import (
+    AllFloorsCsvData,
     AllFloorsData,
     AnalysisTask,
     CsvFloor,
@@ -1822,7 +922,7 @@ from backup.models import (
     PlanFloor,
     Property,
     ScrapingJob,
-    TotalAreaData,
+    TotalAreasCsvData,
 )
 
 # --- Filters (No changes needed here) ---
@@ -2106,13 +1206,10 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
     progress_bar.short_description = "Progress Bar"
 
     def property_link(self, obj):
-        # --- CORRECTED reverse() CALL ---
-        # Original: "admin:backup_backupproperty_change"
-        # Correct:  "admin:backup_property_change" (app_label=backup, model_name=property)
         if obj.property_primary_key:
             try:
                 url = reverse(
-                    "admin:backup_property_change", args=[obj.property_primary_key]
+                    "admin:sdb_property_change", args=[obj.property_primary_key]
                 )
                 return format_html('<a href="{}">{}</a>', url, obj.property_primary_key)
             except NoReverseMatch:
@@ -2175,12 +1272,9 @@ class ScrapingJobAdmin(admin.ModelAdmin):
     job_url.short_description = "Source URL"
 
     def property_link(self, obj):
-        # --- CORRECTED reverse() CALL ---
-        # Original: "admin:backup_backupproperty_change"
-        # Correct:  "admin:backup_property_change" (app_label=backup, model_name=property)
         if obj.property_id:
             try:
-                url = reverse("admin:backup_property_change", args=[obj.property_id])
+                url = reverse("admin:sdb_property_change", args=[obj.property_id])
                 return format_html('<a href="{}">{}</a>', url, obj.property_id)
             except NoReverseMatch:
                 return f"{obj.property_id} (Link Error)"
@@ -2190,12 +1284,9 @@ class ScrapingJobAdmin(admin.ModelAdmin):
     property_link.admin_order_field = "property_id"
 
     def task_link(self, obj):
-        # --- CORRECTED reverse() CALL ---
-        # Original: "admin:backup_backupanalysistask_change"
-        # Correct:  "admin:backup_analysistask_change" (app_label=backup, model_name=analysistask)
         if obj.task_id:
             try:
-                url = reverse("admin:backup_analysistask_change", args=[obj.task_id])
+                url = reverse("admin:sdb_analysistask_change", args=[obj.task_id])
                 return format_html('<a href="{}">{}</a>', url, obj.task_id)
             except NoReverseMatch:
                 return f"{obj.task_id} (Link Error)"
@@ -2255,7 +1346,7 @@ class AllFloorsDataAdmin(admin.ModelAdmin):
 
     def floor_plan_link(self, obj):
         if obj.floor_plan:
-            url = reverse("admin:backup_floorplan_change", args=[obj.floor_plan.id])
+            url = reverse("admin:sdb_floorplan_change", args=[obj.floor_plan.id])
             return format_html(
                 '<a href="{}">{} (ID: {})</a>',
                 url,
@@ -2314,9 +1405,9 @@ class PlanFloorAdmin(admin.ModelAdmin):
     )
     list_select_related = ("floor_plan",)
 
-    def floor_plan_link(self, obj):  # DRY violation - consider a helper mixin later
+    def floor_plan_link(self, obj):
         if obj.floor_plan:
-            url = reverse("admin:backup_floorplan_change", args=[obj.floor_plan.id])
+            url = reverse("admin:sdb_floorplan_change", args=[obj.floor_plan.id])
             return format_html(
                 '<a href="{}">{} (ID: {})</a>',
                 url,
@@ -2357,7 +1448,7 @@ class CsvFloorAdmin(admin.ModelAdmin):
     def all_floors_data_link(self, obj):
         if obj.all_floors_data:
             url = reverse(
-                "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+                "admin:sdb_allfloorsdata_change", args=[obj.all_floors_data.id]
             )
             fp_id = (
                 obj.all_floors_data.floor_plan.floorplan_id
@@ -2393,7 +1484,7 @@ class CsvRoomAdmin(admin.ModelAdmin):
 
     def csv_floor_link(self, obj):
         if obj.csv_floor:
-            url = reverse("admin:backup_csvfloor_change", args=[obj.csv_floor.id])
+            url = reverse("admin:sdb_csvfloor_change", args=[obj.csv_floor.id])
             return format_html(
                 '<a href="{}">{} (ID: {})</a>',
                 url,
@@ -2424,7 +1515,7 @@ class CsvRoomPixelDataAdmin(admin.ModelAdmin):
 
     def csv_room_link(self, obj):
         if obj.csv_room:
-            url = reverse("admin:backup_csvroom_change", args=[obj.csv_room.id])
+            url = reverse("admin:sdb_csvroom_change", args=[obj.csv_room.id])
             return format_html(
                 '<a href="{}">{} (ID: {})</a>',
                 url,
@@ -2472,8 +1563,8 @@ class CsvRoomScalingFactorsAdmin(admin.ModelAdmin):
     csv_room_link.short_description = "CSV Room"
 
 
-@admin.register(AllFloorsCsvRawRow)
-class AllFloorsCsvRawRowAdmin(admin.ModelAdmin):
+@admin.register(AllFloorsCsvData)
+class AllFloorsCsvDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "all_floors_data_link",
@@ -2490,18 +1581,16 @@ class AllFloorsCsvRawRowAdmin(admin.ModelAdmin):
         "room_id",
         "all_floors_data__floor_plan__floorplan_id",
     )
-    # Make fields read-only as it's backup data
-    readonly_fields = [f.name for f in AllFloorsCsvRawRow._meta.get_fields()]
+    # Make fields read-only as it's sdb data
+    readonly_fields = [f.name for f in AllFloorsCsvData._meta.get_fields()]
     list_select_related = ("all_floors_data__floor_plan",)
     list_per_page = 100
 
     def all_floors_data_link(self, obj):
-        # --- This reverse() call was already correct ---
-        # Correct: "admin:backup_allfloorsdata_change" (app_label=backup, model_name=allfloorsdata)
         if obj.all_floors_data:
             try:
                 url = reverse(
-                    "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+                    "admin:sdb_allfloorsdata_change", args=[obj.all_floors_data.id]
                 )
                 fp_id = (
                     obj.all_floors_data.floor_plan.floorplan_id
@@ -2522,8 +1611,8 @@ class AllFloorsCsvRawRowAdmin(admin.ModelAdmin):
     all_floors_data_link.admin_order_field = "all_floors_data"
 
 
-@admin.register(TotalAreaData)
-class TotalAreaDataAdmin(admin.ModelAdmin):
+@admin.register(TotalAreasCsvData)
+class TotalAreasCsvDataAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "all_floors_data_link",
@@ -2539,12 +1628,10 @@ class TotalAreaDataAdmin(admin.ModelAdmin):
     list_select_related = ("all_floors_data__floor_plan",)
 
     def all_floors_data_link(self, obj):  # DRY violation
-        # --- This reverse() call was already correct ---
-        # Correct: "admin:backup_allfloorsdata_change" (app_label=backup, model_name=allfloorsdata)
         if obj.all_floors_data:
             try:
                 url = reverse(
-                    "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+                    "admin:sdb_allfloorsdata_change", args=[obj.all_floors_data.id]
                 )
                 fp_id = (
                     obj.all_floors_data.floor_plan.floorplan_id
@@ -2565,48 +1652,46 @@ class TotalAreaDataAdmin(admin.ModelAdmin):
     all_floors_data_link.admin_order_field = "all_floors_data"
 
 
-# backup/schema.png
+# sdb/schema.png
 // Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
 
 
-# backup/tests.py
+# sdb/tests.py
 from django.test import TestCase
 
 # Create your tests here.
 
 
-# backup/urls.py
+# sdb/urls.py
 from django.urls import path
 
-from backup import views
+from sdb import views
 
 urlpatterns = [
-    path("property/", views.BackupPropertyView.as_view(), name="property"),
-    path(
-        "analysis-task/", views.BackupAnalysisTaskView.as_view(), name="analysis-task"
-    ),
-    path("scraping-job/", views.BackupScrapingJobView.as_view(), name="scraping-job"),
-    path("floorplan/", views.CompleteBackupFloorPlanView.as_view(), name="floorplan"),
+    path("property/", views.SDBPropertyView.as_view(), name="property"),
+    path("analysis-task/", views.SDBAnalysisTaskView.as_view(), name="analysis-task"),
+    path("scraping-job/", views.SDBScrapingJobView.as_view(), name="scraping-job"),
+    path("floorplan/", views.CompleteSDBFloorPlanView.as_view(), name="floorplan"),
 ]
 
 
-# backup/views.py
+# sdb/views.py
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from backup.models import AnalysisTask, Property, ScrapingJob
-from backup.serializers import (
+from sdb.models import AnalysisTask, Property, ScrapingJob
+from sdb.serializers import (
     AnalysisTaskSerializer,
-    CompleteBackupFloorPlanSerializer,
+    CompletesdbFloorPlanSerializer,
     PropertySerializer,
     ScrapingJobSerializer,
 )
 
 
-class BackupPropertyView(APIView):
+class SDBPropertyView(APIView):
     """
-    API endpoint to create, update, and list backup properties.
+    API endpoint to create, update, and list sdb properties.
     """
 
     def post(self, request, *args, **kwargs):
@@ -2614,9 +1699,9 @@ class BackupPropertyView(APIView):
 
         try:
             # If it already exists, we do an update
-            backup_property = Property.objects.get(primary_key=primary_key)
+            sdb_property = Property.objects.get(primary_key=primary_key)
             serializer = PropertySerializer(
-                backup_property, data=request.data, partial=True
+                sdb_property, data=request.data, partial=True
             )
         except Property.DoesNotExist:
             # Otherwise create a new one
@@ -2629,15 +1714,15 @@ class BackupPropertyView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, *args, **kwargs):
-        # Return all backup properties (or filter as needed)
+        # Return all sdb properties (or filter as needed)
         properties = Property.objects.all()
         serializer = PropertySerializer(properties, many=True)
         return Response(serializer.data)
 
 
-class BackupAnalysisTaskView(APIView):
+class SDBAnalysisTaskView(APIView):
     """
-    API endpoint to create and list backup analysis tasks.
+    API endpoint to create and list sdb analysis tasks.
     """
 
     def post(self, request, *args, **kwargs):
@@ -2653,7 +1738,7 @@ class BackupAnalysisTaskView(APIView):
         return Response(serializer.data)
 
 
-class BackupScrapingJobView(APIView):
+class SDBScrapingJobView(APIView):
     def post(self, request, *args, **kwargs):
         serializer = ScrapingJobSerializer(data=request.data)
         if serializer.is_valid():
@@ -2667,23 +1752,23 @@ class BackupScrapingJobView(APIView):
         return Response(serializer.data)
 
 
-class CompleteBackupFloorPlanView(APIView):
+class CompleteSDBFloorPlanView(APIView):
     """
-    API endpoint to receive and store the complete backup of floorplan data.
+    API endpoint to receive and store the complete floorplan data.
     """
 
     def post(self, request, *args, **kwargs):
-        serializer = CompleteBackupFloorPlanSerializer(data=request.data)
+        serializer = CompletesdbFloorPlanSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# backup/management/__init__.py
+# sdb/management/__init__.py
 
 
-# backup/management/commands/generate_backup_stats.py
+# sdb/management/commands/generate_backup_stats.py
 import datetime
 
 from django.core.exceptions import FieldDoesNotExist
@@ -2692,13 +1777,13 @@ from django.db.models import Count, F, Max, Min, Q, Sum  # Ensure Min, Max are i
 from django.db.models.functions import Length
 
 # Import necessary models
-from backup.models import (  # Import others ONLY if directly queried for dates below
-    AllFloorsCsvRawRow,
+from sdb.models import (  # Import others ONLY if directly queried for dates below
+    AllFloorsCsvData,
     AllFloorsData,
     FloorPlan,
     FloorPlanAnalysisResult,
     Property,
-    TotalAreaData,
+    TotalAreasCsvData,
 )
 
 
@@ -2756,12 +1841,12 @@ def format_output(label, count, min_created, max_updated):
 
 
 class Command(BaseCommand):
-    help = "Generates statistics report for the backup application data, including date ranges per statistic."
+    help = "Generates statistics report for the application data, including date ranges per statistic."
 
     def handle(self, *args, **options):
         self.stdout.write(
             self.style.SUCCESS(
-                "--- Generating Backup Application Statistics (with Date Ranges per Stat) ---"
+                "--- Generating Application Statistics (with Date Ranges per Stat) ---"
             )
         )
 
@@ -2796,7 +1881,7 @@ class Command(BaseCommand):
             # We already calculated this and its date range above
             self.stdout.write(
                 format_output(
-                    "Number of properties scraped (in backup)",
+                    "Number of properties scraped (in sdb)",
                     total_properties_count,
                     *get_date_range_for_queryset(all_properties_qs, Property),
                 )
@@ -3010,7 +2095,7 @@ class Command(BaseCommand):
             # 14. Number of properties with an AI Floorplan Analysis (has FloorPlan record)
             # FIX: Avoid distinct + aggregate. Get relevant FPAR IDs then filter.
             ai_fpar_ids = (
-                FloorPlanAnalysisResult.objects.filter(backup_floor_plans__isnull=False)
+                FloorPlanAnalysisResult.objects.filter(sdb_floor_plans__isnull=False)
                 .values_list("id", flat=True)
                 .distinct()
             )  # Get IDs of FPARs linked to FloorPlans
@@ -3058,10 +2143,10 @@ class Command(BaseCommand):
                 )
             )
 
-            # 16. Number of properties with AI Floorplan Analysis - AllFloorsCsvRawRow
-            # Note: Renamed from "with allfloors CSV AllFloorsCsvRawRow" for clarity
+            # 16. Number of properties with AI Floorplan Analysis - AllFloorsCsvData
+            # Note: Renamed from "with allfloors CSV AllFloorsCsvData" for clarity
             allfloors_raw_rows_qs = AllFloorsData.objects.filter(
-                backup_all_floors_raw_rows__isnull=False
+                all_floors_csv_data__isnull=False
             ).distinct()  # Distinct AllFloorsData linked to raw rows
             # Count distinct properties linked
             prop_ids_raw_rows = allfloors_raw_rows_qs.values_list(
@@ -3074,7 +2159,7 @@ class Command(BaseCommand):
             )
             self.stdout.write(
                 format_output(
-                    "Number of properties with AI Floorplan Analysis - AllFloorsCsvRawRow data present",
+                    "Number of properties with AI Floorplan Analysis - AllFloorsCsvData data present",
                     properties_ai_fp_raw_rows_count,
                     min_c,
                     max_u,
@@ -3113,1010 +2198,6 @@ class Command(BaseCommand):
         )
 
 
-# backup/management/commands/__init__.py
-
-
-# pabackup_service/tasks.py
-from celery import shared_task
-
-
-@shared_task
-def my_task(param):
-    # Do something
-    print(param)
-
-
-# pabackup_service/asgi.py
-import os
-
-import django
-from decouple import config
-from django.core.asgi import get_asgi_application
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", config("DJANGO_SETTINGS_MODULE"))
-django.setup()
-
-application = get_asgi_application()
-
-
-# pabackup_service/__init__.py
-from pabackup_service.celery import app as celery_app
-
-__all__ = ("celery_app",)
-
-
-# pabackup_service/celery.py
-import os
-
-from celery import Celery
-from decouple import config
-from django.conf import settings
-
-# set the default Django settings module for the 'celery' program.
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", config("DJANGO_SETTINGS_MODULE"))
-
-app = Celery("pabackup_service")
-
-# Using a string here means the worker doesn't have to serialize
-# the configuration object to child processes.
-app.config_from_object("django.conf:settings", namespace="CELERY")
-
-# # Set default queue
-# app.conf.task_default_queue = "analysis_queue"
-
-# # Load task modules from all registered Django app configs.
-app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
-
-# app.autodiscover_tasks()
-app.conf.broker_url = config("REDIS_URL")
-
-
-@app.task(bind=True)
-def debug_task(self):
-    print(f"Request: {self.request!r}")
-
-
-# pabackup_service/urls.py
-from django.conf import settings
-from django.conf.urls.static import static
-from django.contrib import admin
-from django.contrib.staticfiles.urls import staticfiles_urlpatterns
-from django.urls import include, path
-from drf_spectacular.views import (
-    SpectacularAPIView,
-    SpectacularRedocView,
-    SpectacularSwaggerView,
-)
-from drf_yasg import openapi
-from drf_yasg.views import get_schema_view
-from rest_framework import permissions
-from rest_framework.routers import DefaultRouter
-
-from accounts import views as account_views
-
-router = DefaultRouter()
-
-schema_view = get_schema_view(
-    openapi.Info(
-        title="Property Analysis API",
-        default_version="v1",
-        description="This is the documentation for Property Analysis API",
-        terms_of_service="https://www.google.com/policies/terms/",
-        contact=openapi.Contact(email="contact@snippets.local"),
-        license=openapi.License(name="BSD License"),
-    ),
-    public=True,
-    permission_classes=[permissions.AllowAny],
-    authentication_classes=[],
-)
-
-default_urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("dj-rest-auth/", include("dj_rest_auth.urls")),
-    path("dj-rest-auth/registration/", include("dj_rest_auth.registration.urls")),
-]
-
-permissions_urlpatterns = [
-    path("api/csrf-cookie/", account_views.GetCSRFToken.as_view()),
-]
-
-custom_urlpatterns = [
-    path("api/auth/", include("accounts.urls")),
-    path("api/backup/", include("backup.urls")),
-]
-
-spectacular_urlpatterns = [
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    # Optional UI:
-    path(
-        "api/schema/swagger-ui/",
-        SpectacularSwaggerView.as_view(url_name="schema"),
-        name="swagger-ui",
-    ),
-    path(
-        "api/schema/redoc/",
-        SpectacularRedocView.as_view(url_name="schema"),
-        name="redoc",
-    ),
-] + router.urls
-
-swagger_urlpatterns = [
-    path("swagger.json", schema_view.without_ui(cache_timeout=0), name="schema-json"),
-    path(
-        "swagger/",
-        schema_view.with_ui("swagger", cache_timeout=0),
-        name="schema-swagger-ui",
-    ),
-    path("redoc/", schema_view.with_ui("redoc", cache_timeout=0), name="schema-redoc"),
-]
-
-urlpatterns = (
-    default_urlpatterns
-    + custom_urlpatterns
-    + spectacular_urlpatterns
-    + swagger_urlpatterns
-    + permissions_urlpatterns
-)
-
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-urlpatterns += staticfiles_urlpatterns()
-
-
-# pabackup_service/wsgi.py
-"""
-WSGI config for pabackup_service project.
-
-It exposes the WSGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/4.2/howto/deployment/wsgi/
-"""
-
-import os
-
-from django.core.wsgi import get_wsgi_application
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "pabackup_service.settings")
-
-application = get_wsgi_application()
-
-
-# pabackup_service/settings/__init__.py
-
-
-# pabackup_service/settings/dev.py
-from .base import *
-
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
-
-
-# ================================ SUPERUSER =======================================
-ADMIN_USERNAME = config("ADMIN_USERNAME")
-ADMIN_EMAIL = config("ADMIN_EMAIL")
-ADMIN_PASSWORD = config("ADMIN_PASSWORD")
-# ================================ SUPERUSER =======================================
-
-
-# ================================ DATABASES =======================================
-DATABASES = {
-    "default": dj_database_url.config(default="sqlite:///db.sqlite3", conn_max_age=600)
-}
-
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.db.backends.sqlite3",
-#         "NAME": BASE_DIR / "db.sqlite3",
-#     }
-# }
-# ================================ DATABASES =======================================
-
-
-# ================================ STORAGES =======================================
-# ==> STATIC FILE UPLOADS
-STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, "static"),
-]
-
-# ==> MEDIA FILE UPLOADS
-MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
-# ================================ STORAGES =======================================
-
-
-# ================================ REDIS/CHANNELS =======================================
-# CACHES = {
-#     "default": {
-#         "BACKEND": "django_redis.cache.RedisCache",
-#         "LOCATION": config("REDIS_URL"),
-#         "OPTIONS": {
-#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-#         }
-#     }
-# }
-
-# ==> CHANNELS
-default_channel_layer = {
-    "BACKEND": "channels_redis.core.RedisChannelLayer",
-    "CONFIG": {
-        "hosts": [config("REDIS_URL")],  # , 'redis://127.0.0.1:6379')],
-    },
-}
-CHANNEL_LAYERS = {"default": default_channel_layer}
-# ================================ REDIS =======================================
-
-
-# ================================ CELERY =======================================
-# Use the actual IP address and port of your Redis server
-CELERY_BROKER_URL = config("REDIS_URL")
-CELERY_RESULT_BACKEND = config("REDIS_URL")
-CELERY_TIMEZONE = "UTC"
-
-# List of modules to import when the Celery worker starts.
-CELERY_IMPORTS = ("pabackup_service.tasks",)
-
-# If using JSON as the serialization format
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-# ================================ CELERY =======================================
-
-
-# pabackup_service/settings/prod.py
-# import django_on_heroku
-
-from celery.schedules import crontab
-
-from .base import *
-
-DEBUG = False
-ALLOWED_HOSTS = ["*"]
-
-
-# ================================ DATABASES =======================================
-DATABASES = {"default": dj_database_url.parse(config("DATABASE_URL"))}
-# DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
-# ================================ DATABASES =======================================
-
-
-# ================================ STORAGES =======================================
-# ==> AMAZON S3 SETTINGS
-AWS_ACCESS_KEY_ID = config("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = config("AWS_SECRET_ACCESS_KEY")
-AWS_STORAGE_BUCKET_NAME = config("AWS_STORAGE_BUCKET_NAME")
-AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = None
-AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
-AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age-86400"}
-AWS_LOCATION = "static"
-AWS_QUERYSTRING_AUTH = False
-AWS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-}
-
-# ==> MEDIA FILE UPLOADS
-PUBLIC_MEDIA_LOCATION = "media"
-MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/{PUBLIC_MEDIA_LOCATION}/"
-# DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-DEFAULT_FILE_STORAGE = "pabackup_service.config.storage_backends.MediaStorage"
-
-# ==> STATIC FILE UPLOADS
-STATICFILES_STORAGE = "storages.backends.s3boto3.S3StaticStorage"
-STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/{AWS_LOCATION}/"
-# ================================ STORAGES =======================================
-
-
-# ================================ PAYMENT =======================================
-# STRIPE_SECRET_KEY=config("STRIPE_SECRET_KEY")
-# STRIPE_PUBLISHABLE_KEY=config("STRIPE_PUBLISHABLE_KEY")
-# STRIPE_WEBHOOK_SECRET=config("STRIPE_WEBHOOK_SECRET")
-# STRIPE_PRICE_IDS = {
-#     'Essential': config("STRIPE_ESSENTIAL_PRICE_ID"),
-# }
-# ================================ PAYMENT =======================================
-
-
-# ================================ EMAIL =======================================
-# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-
-# EMAIL_HOST = 'smtp.office365.com'  # 'smtp.outlook.office365.com'
-# EMAIL_PORT = 587  # 465  # TLS port
-# EMAIL_USE_TLS = True
-# # EMAIL_USE_SSL = True
-# EMAIL_HOST_USER = config("EMAIL")
-# EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
-# DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL")
-# ================================ EMAIL =======================================
-
-
-# ================================ REDIS/CHANNELS =======================================
-# CACHES = {
-#     "default": {
-#         "BACKEND": "django_redis.cache.RedisCache",
-#         "LOCATION": config("REDIS_URL"),
-#         "OPTIONS": {
-#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-#         }
-#     }
-# }
-
-# ==> CHANNELS
-default_channel_layer = {
-    "BACKEND": "channels_redis.core.RedisChannelLayer",
-    "CONFIG": {
-        "hosts": [config("REDIS_URL")],  # , 'redis://127.0.0.1:6379')],
-    },
-}
-CHANNEL_LAYERS = {"default": default_channel_layer}
-# ================================ REDIS =======================================
-
-
-# ================================ CELERY =======================================
-# Use the actual IP address and port of your Redis server
-CELERY_BROKER_URL = config("REDIS_URL")
-CELERY_RESULT_BACKEND = config("REDIS_URL")
-CELERY_TIMEZONE = "UTC"
-
-# List of modules to import when the Celery worker starts.
-CELERY_IMPORTS = ("pabackup_service.tasks",)
-
-# If using JSON as the serialization format
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-
-# CELERY_TASK_QUEUES = {
-#     "analysis_queue": {
-#         "exchange": "analysis_exchange",
-#         "routing_key": "analysis.#",
-#     },
-# }
-# ================================ CELERY =======================================
-
-# MY_DOMAIN = "http://analysis-app:8000"
-
-# ================================ HEROKU =======================================
-# # ==> HEROKU LOGGING
-# DEBUG_PROPAGATE_EXCEPTIONS = True
-# LOGGING = {
-#     "version": 1,
-#     "disable_existing_loggers": False,
-#     "formatters": {
-#         "verbose": {
-#             "format": "[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s",
-#             "datefmt": "%d/%b/%Y %H:%M:%S",
-#         },
-#         "simple": {
-#             "format": "[%(asctime)s] %(levelname)s %(message)s",
-#         },
-#     },
-#     "handlers": {
-#         "console": {
-#             "level": "DEBUG",
-#             "class": "logging.StreamHandler"
-#         }
-#     },
-#     "loggers": {
-#         "dfxapp": {
-#             "handlers": ["console"],
-#             "level": "INFO",
-#         },
-#     },
-# }
-
-# # ==> HEROKU DATABASE
-# django_on_heroku.settings(locals(), staticfiles=False)
-# del DATABASES["default"]["OPTIONS"]["sslmode"]
-# ================================ HEROKU =======================================
-
-
-# ================================ SSL CONFIG =======================================
-# # Force SSL redirect if site is live
-# if os.getcwd() == '/app':ls
-
-#     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-#     SECURE_SSL_REDIRECT = True
-#     # DEBUG = False
-
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-USE_X_FORWARDED_HOST = True
-# ================================ SSL CONFIG =======================================
-
-
-# pabackup_service/settings/base.py
-import os
-import secrets
-from datetime import timedelta
-from pathlib import Path
-from typing import List
-
-import dj_database_url
-from corsheaders.defaults import default_headers
-from decouple import config
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-SECRET_KEY = config("SECRET_KEY")
-
-# Application definition
-DEFAULT_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
-    "django.contrib.staticfiles",
-]
-
-THIRD_PARTY_APPS = [
-    "corsheaders",
-    "channels",
-    "django_countries",
-    "django_extensions",
-    "django_filters",
-    "django_rest_passwordreset",
-    "drf_yasg",
-    "drf_spectacular",
-    "simple_history",
-    "storages",
-    "django.contrib.sites",
-    "rest_framework",
-    "rest_framework.authtoken",
-    "rest_framework_simplejwt",
-    "rest_framework_simplejwt.token_blacklist",
-    "allauth",
-    "allauth.account",
-    "allauth.socialaccount",
-    "allauth.socialaccount.providers.google",
-    # 'allauth.socialaccount.providers.facebook',
-    "dj_rest_auth",
-    "dj_rest_auth.registration",
-]
-
-LOCAL_APPS = [
-    "accounts",
-    "backup",
-]
-
-OTHER_APPS = [
-    # "debug_toolbar",
-]
-
-INSTALLED_APPS = DEFAULT_APPS + LOCAL_APPS + THIRD_PARTY_APPS + OTHER_APPS
-
-MIDDLEWARE = [
-    "django.middleware.security.SecurityMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
-    "corsheaders.middleware.CorsMiddleware",  # Custom added
-    "simple_history.middleware.HistoryRequestMiddleware",
-    "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "allauth.account.middleware.AccountMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
-    "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # 'accounts.middleware.PaymentMiddleware',
-]
-
-ROOT_URLCONF = "pabackup_service.urls"
-
-TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [os.path.join(BASE_DIR, "templates")],
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.debug",
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-        },
-    },
-]
-
-WSGI_APPLICATION = "pabackup_service.wsgi.application"
-
-
-# Password validation
-# https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
-
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
-    },
-]
-
-
-# Internationalization
-# https://docs.djangoproject.com/en/4.2/topics/i18n/
-
-LANGUAGE_CODE = "en-us"
-
-TIME_ZONE = "UTC"
-
-USE_I18N = True
-
-USE_TZ = True
-
-# Default primary key field type
-# https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
-
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-
-# ================================ CUSTOM CONFIGS =======================================
-AUTH_USER_MODEL = "accounts.User"
-ASGI_APPLICATION = "pabackup_service.asgi.application"
-
-LOGIN_URL = "login"
-LOGOUT_URL = "logout"
-LOGIN_REDIRECT_URL = "index"  # "dashboard"
-LOGOUT_REDIRECT_URL = "login"
-
-
-def get_origin_list(env_variable: str, default: str = "") -> List[str]:
-    origins: str = config(env_variable, default)
-    return [origin.strip() for origin in origins.split(",") if origin.strip()]
-
-
-# ==> CORS
-CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = get_origin_list("CORS_ORIGINS")
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_HEADERS = list(default_headers) + [
-    "x-csrftoken",
-]
-
-# ==> CSRF
-CSRF_TRUSTED_ORIGINS = get_origin_list("CSRF_TRUSTED_ORIGINS")
-CSRF_COOKIE_SAMESITE = "Lax"
-SESSION_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_HTTPONLY = False  # False to allow JavaScript to access the cookie
-SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_DOMAIN = ".supersami.com"
-# SESSION_COOKIE_SECURE = True
-
-# ==> CONSTANTS
-CART_SESSION_ID = secrets.token_urlsafe(16)
-
-SITE_ID = 1
-
-# ==> AUTHENTICATION
-AUTHENTICATION_BACKENDS = [
-    "django.contrib.auth.backends.ModelBackend",
-    # "allauth.account.auth_backends.AuthenticationBackend",
-]
-
-SOCIALACCOUNT_PROVIDERS = {
-    "google": {
-        "APP": {
-            "client_id": config("GOOGLE_CLIENT_ID"),
-            "secret": config("GOOGLE_CLIENT_SECRET"),
-            "key": "",
-        },
-        "SCOPE": [
-            "profile",
-            "email",
-        ],
-        "AUTH_PARAMS": {
-            "access_type": "online",
-        },
-    }
-}
-
-# ==> AllAuth settings
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_AUTHENTICATION_METHOD = "email"
-ACCOUNT_EMAIL_VERIFICATION = "mandatory"
-
-# ==> DJ-REST-Auth settings
-REST_AUTH = {
-    "USE_JWT": True,
-    "JWT_AUTH_COOKIE": "my-app-auth",
-    "JWT_AUTH_REFRESH_COOKIE": "my-refresh-token",
-}
-
-# ==> REST FRAMEWORK
-REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.TokenAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
-    ],
-    # "DEFAULT_PERMISSION_CLASSES": [
-    #     "rest_framework.permissions.IsAuthenticated",
-    # ],
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 10,
-}
-
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=10),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": False,
-    "UPDATE_LAST_LOGIN": False,
-    "ALGORITHM": "HS256",
-    "SIGNING_KEY": SECRET_KEY,
-    "VERIFYING_KEY": "",
-    "AUDIENCE": None,
-    "ISSUER": None,
-    "JSON_ENCODER": None,
-    "JWK_URL": None,
-    "LEEWAY": 0,
-    "AUTH_HEADER_TYPES": ("Bearer",),
-    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
-    "USER_ID_FIELD": "id",
-    "USER_ID_CLAIM": "user_id",
-    "USER_AUTHENTICATION_RULE": "rest_framework_simplejwt.authentication.default_user_authentication_rule",
-    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
-    "TOKEN_TYPE_CLAIM": "token_type",
-    "TOKEN_USER_CLASS": "rest_framework_simplejwt.models.TokenUser",
-    "JTI_CLAIM": "jti",
-    "SLIDING_TOKEN_REFRESH_EXP_CLAIM": "refresh_exp",
-    "SLIDING_TOKEN_LIFETIME": timedelta(minutes=15),
-    "SLIDING_TOKEN_REFRESH_LIFETIME": timedelta(days=1),
-    "TOKEN_OBTAIN_SERIALIZER": "rest_framework_simplejwt.serializers.TokenObtainPairSerializer",
-    "TOKEN_REFRESH_SERIALIZER": "rest_framework_simplejwt.serializers.TokenRefreshSerializer",
-    "TOKEN_VERIFY_SERIALIZER": "rest_framework_simplejwt.serializers.TokenVerifySerializer",
-    "TOKEN_BLACKLIST_SERIALIZER": "rest_framework_simplejwt.serializers.TokenBlacklistSerializer",
-    "SLIDING_TOKEN_OBTAIN_SERIALIZER": "rest_framework_simplejwt.serializers.TokenObtainSlidingSerializer",
-    "SLIDING_TOKEN_REFRESH_SERIALIZER": "rest_framework_simplejwt.serializers.TokenRefreshSlidingSerializer",
-}
-
-SPECTACULAR_SETTINGS = {
-    "TITLE": "Property Analysis API",
-    "DESCRIPTION": "Property Analysis description",
-    "VERSION": "1.0.0",
-    "SERVE_INCLUDE_SCHEMA": True,
-}
-
-# ================================ CUSTOM VARIABLES =======================================
-# ==> SUPERUSER
-ADMIN_USERNAME = config("ADMIN_USERNAME")
-ADMIN_EMAIL = config("ADMIN_EMAIL")
-ADMIN_PHONE = config("ADMIN_PHONE")
-ADMIN_PASSWORD = config("ADMIN_PASSWORD")
-
-# ==> OPENAI
-OPENAI_API_KEY = config("OPENAI_API_KEY")
-ASSISTANT_ID = config("ASSISTANT_ID")
-MODEL_NAME = config("MODEL_NAME")
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-
-# ==> EXTERNAL SERVICES
-ORCHESTRATOR_APP_URL = config("ORCHESTRATOR_APP_URL")
-
-# ANALYSIS SERVICE
-ANALYSIS_SERVICE_URL = config("ANALYSIS_SERVICE_URL")
-
-# SCRAPER SERVICE
-SCRAPER_SERVICE_URL = config("SCRAPER_SERVICE_URL")
-
-# NOTIFICATION SERVICE
-NOTIFICATION_SERVICE_URL = config("NOTIFICATION_SERVICE_URL")
-NOTIFICATION_RECIPIENT_EMAIL = "contactugodaniels@gmail.com"
-
-# FRONTEND APP
-FRONTEND_APP = config("FRONTEND_APP")
-# ================================ CUSTOM VARIABLES =======================================
-
-
-# pabackup_service/config/logging_config.py
-import logging
-import os
-
-
-class CustomFormatter(logging.Formatter):
-    def __init__(self, fmt="%(levelname)s: %(message)s"):
-        super().__init__(fmt)
-
-    def format(self, record):
-        # Change format for ERROR level and above (ERROR, CRITICAL)
-        if record.levelno >= logging.ERROR:
-            self._style._fmt = "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
-        else:
-            self._style._fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        return super().format(record)
-
-
-def configure_logger(name):
-    # Create or get a logger
-    logger = logging.getLogger(name)
-
-    # Set the log level
-    logger.setLevel(logging.DEBUG)  # Set to DEBUG to catch all levels
-
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(CustomFormatter())
-
-    # Create file handler for connection logs
-    file_handler = logging.FileHandler("connections.log")
-    file_handler.setFormatter(CustomFormatter())
-
-    # Add handlers to the logger
-    if not logger.handlers:  # Avoid adding multiple handlers if already present
-        logger.addHandler(console_handler)
-        logger.addHandler(file_handler)
-
-    return logger
-
-
-def configure_file_logger(name):
-    # Create or get a logger
-    logger = logging.getLogger(name)
-
-    # Set the log level
-    logger.setLevel(logging.DEBUG)  # Set to DEBUG to catch all levels
-
-    # Create file handler for connection logs
-    log_file_path = "pabackup_service/connections.log"
-    file_handler = logging.FileHandler(log_file_path)
-    file_handler.setFormatter(CustomFormatter())
-
-    # Add handler to the logger
-    if not any(
-        isinstance(handler, logging.FileHandler) for handler in logger.handlers
-    ):  # Avoid adding multiple file handlers
-        logger.addHandler(file_handler)
-
-    return logger
-
-
-# pabackup_service/config/__init__.py
-
-
-# pabackup_service/config/storage_backends.py
-from storages.backends.s3boto3 import S3Boto3Storage
-
-# class StaticStorage(S3Boto3Storage):
-#     location = "static"
-#     default_acl = "private"
-
-
-class MediaStorage(S3Boto3Storage):
-    location = "media"
-    default_acl = "private"
-    file_overwrite = False
-
-
-# docker-compose-prod.yml
-services:
-  web:
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    image: pabackup
-    command: >
-      sh -c " 
-        # python manage.py makemigrations &&
-        # python manage.py migrate &&  
-        # python manage.py populate_db &&
-        daphne pabackup_service.asgi:application -b 0.0.0.0 -p 8000
-      "
-    volumes:
-      - .:/code
-    expose:
-      - "8000"
-    depends_on:
-      - redis
-    container_name: backup-analysis-app
-    environment:
-      - VIRTUAL_HOST=backup.supersami.com
-      - LETSENCRYPT_HOST=backup.supersami.com
-      - LETSENCRYPT_EMAIL=rolfgroenewold@gmail.com
-
-  redis:
-    image: redis:latest
-    container_name: backup-analysis-app-redis
-
-  nginx-proxy:
-    image: jwilder/nginx-proxy
-    container_name: nginx_reverse_proxy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - ./certs:/etc/nginx/certs:ro
-      - ./nginx/vhost.d:/etc/nginx/vhost.d
-      - ./nginx/html:/usr/share/nginx/html
-      # - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    environment:
-      - DEFAULT_HOST=backup.supersami.com
-
-  letsencrypt-nginx-proxy-companion:
-    image: jrcs/letsencrypt-nginx-proxy-companion
-    container_name: nginx_letsencrypt
-    depends_on:
-      - nginx-proxy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./certs:/etc/nginx/certs:rw
-      - ./nginx/vhost.d:/etc/nginx/vhost.d
-      - ./nginx/html:/usr/share/nginx/html
-      - ./nginx/acme.sh:/etc/acme.sh
-    environment:
-      - NGINX_PROXY_CONTAINER=nginx_reverse_proxy
-      - DEFAULT_EMAIL=rolfgroenewold@gmail.com
-
-  celery:
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    image: pabackup
-    command: >
-      sh -c "
-        echo 'Waiting for backup-analysis-app and redis...';
-        while ! nc -z backup-analysis-app 8000 || ! nc -z redis 6379; do
-          sleep 1;
-        done;
-        echo 'Web and Redis are up - starting celery worker';
-        celery -A pabackup_service worker --loglevel=info;
-      "
-    volumes:
-      - .:/code
-    depends_on:
-      - redis
-      - web
-    container_name: backup-analysis-app-celery
-
-
-# docker-compose.yml
-services:
-  web:
-    container_name: backup-app
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: >
-      sh -c "
-        # python manage.py makemigrations &&
-        # python manage.py migrate &&
-        daphne pabackup_service.asgi:application -b 0.0.0.0 -p 8000
-      "
-    volumes:
-      - .:/code
-    ports:
-      - "8000:8000"
-    depends_on:
-      - redis
-    # networks:
-    #   - default
-
-  redis:
-    container_name: backup-app-redis
-    image: redis:latest
-    # networks:
-    #   - default
-
-  celery:
-    container_name: backup-app-celery
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: >
-      sh -c "
-        echo 'Waiting for backup-app and redis...';
-        while ! nc -z backup-app 8000 || ! nc -z redis 6379; do
-          sleep 1;
-        done;
-        echo 'Web and Redis are up - starting celery worker';
-        celery -A pabackup_service worker --loglevel=info
-      "
-    volumes:
-      - .:/code
-    depends_on:
-      - redis
-#     networks:
-#       - default
-
-# networks:
-#   default:
-#     name: shared_network
-#     external: true
-
-
-# Dockerfile
-# Pull the base image
-FROM python:3.9
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-
-# Install necessary system dependencies
-RUN apt-get update -y && \
-    apt-get install -y \
-    openjdk-17-jdk \
-    netcat-openbsd \
-    wget \
-    gnupg \
-    curl \
-    chromium \
-    chromium-driver
-
-# Install Node.js for Playwright
-RUN curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && \
-    apt-get install -y nodejs
-
-# Clean up APT when done
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Set work directory
-WORKDIR /code
-
-# Copy project
-COPY . /code/
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Set execute permission for entrypoint.sh
-RUN chmod +x /code/entrypoint.sh
-
-ENTRYPOINT ["/code/entrypoint.sh"]
-
-# Run the application
-CMD ["daphne", "pabackup_service.asgi:application", "--port", "$PORT", "--bind", "0.0.0.0"]
-
-
-# install_docker.sh
-#!/bin/bash
-
-# Update package index
-sudo apt-get update
-
-# Install Docker and Docker Compose from Ubuntu's repository
-# sudo apt-get install -y docker.io docker-compose
-
-# Optionally, install the latest version of Docker from Docker's official repository
-# Uncomment the following lines to use this option
-
-# Remove any existing Docker installations
-sudo apt-get remove -y docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc
-
-# Install dependencies
-sudo apt-get install -y ca-certificates curl gnupg lsb-release
-
-# Add Docker's GPG key and repository
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# Install Docker Engine, CLI, and Containerd
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# Verify Docker installation
-docker -v
-
-# Run Docker without sudo (optional)
-sudo usermod -aG docker $USER
-
-# Inform user to log out and log back in
-echo "Please log out and log back in to apply Docker group changes, or reboot the system."
-
-# make this script executable with "chmod +x install_docker.sh"
-# run script with "./install_docker.sh".
+# sdb/management/commands/__init__.py
 
 

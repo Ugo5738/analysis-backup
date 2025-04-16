@@ -50,7 +50,7 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "accounts",
-    "backup",
+    "sdb",
 ]
 
 OTHER_APPS = [

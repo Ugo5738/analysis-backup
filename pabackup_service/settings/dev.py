@@ -12,9 +12,17 @@ ADMIN_PASSWORD = config("ADMIN_PASSWORD")
 
 
 # ================================ DATABASES =======================================
-DATABASES = {
-    "default": dj_database_url.config(default="sqlite:///db.sqlite3", conn_max_age=600)
-}
+# Get the URL from environment variable or default to SQLite
+# Ensure a sensible default for local dev if DATABASE_URL isn't set
+default_db_url = config("DATABASE_URL", default=None)
+if not default_db_url:
+    # Construct a default SQLite path relative to BASE_DIR if not set
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default_db_url = f"sqlite:///{os.path.join(BASE_DIR, 'db.sqlite3')}"
+    print(f"WARNING: DATABASE_URL not set, using default SQLite: {default_db_url}")
+
+DATABASES = {"default": dj_database_url.parse(default_db_url)}
+
 
 # DATABASES = {
 #     "default": {

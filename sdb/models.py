@@ -13,7 +13,7 @@ ANALYSIS_SOURCE = [("email", "Email"), ("original", "Original")]
 
 class Property(models.Model):
     """
-    Backup copy of a property record.
+    Copy of a property record.
     """
 
     primary_key = models.IntegerField(unique=True)
@@ -124,21 +124,17 @@ class FloorPlanAnalysisResult(TrackingModel):
 class FloorPlan(TrackingModel):
     analysis_result = models.ForeignKey(
         FloorPlanAnalysisResult,
-        related_name="backup_floor_plans",
+        related_name="sdb_floor_plans",
         on_delete=models.CASCADE,
     )
-    floorplan_id = models.CharField(max_length=255)
-    # floorplan_id = models.CharField(
-    #     max_length=64,
-    #     db_index=True,  # unique=True,
-    # )  # Ensures DB-level uniqueness and speeds up lookups
-    original_url = models.URLField()
-    # original_url = models.URLField(
-    #     max_length=1024
-    # )
-    # update_count = models.PositiveIntegerField(
-    #     default=0, help_text="Number of times webhook processing updated this record."
-    # )
+    floorplan_id = models.CharField(
+        max_length=64,
+        db_index=True,  # unique=True,
+    )  # Ensures DB-level uniqueness and speeds up lookups
+    original_url = models.URLField(max_length=1024)
+    update_count = models.PositiveIntegerField(
+        default=0, help_text="Number of times webhook processing updated this record."
+    )
 
     history = HistoricalRecords(table_name="history_sdb_floorplans")
 
@@ -184,20 +180,15 @@ class FloorPlan(TrackingModel):
 
 class AllFloorsData(TrackingModel):
     floor_plan = models.OneToOneField(
-        FloorPlan, related_name="backup_all_floors_data", on_delete=models.CASCADE
+        FloorPlan, related_name="sdb_all_floors_data", on_delete=models.CASCADE
     )
-    json_file_url = models.URLField()
-    csv_url = models.URLField()  # change to all_floors_csv_url
-    total_area_csv_url = models.URLField()
-    image_labelme_side_by_side_url = models.URLField()
-    notes = models.TextField(blank=True, null=True)
-    # json_file_url = models.URLField(max_length=1024, null=True, blank=True)
-    # csv_url = models.URLField(max_length=1024, null=True, blank=True)
-    # total_area_csv_url = models.URLField(max_length=1024, null=True, blank=True)
-    # image_labelme_side_by_side_url = models.URLField(
-    #     max_length=1024, null=True, blank=True
-    # )
-    # notes = models.TextField(null=True, blank=True)
+    json_file_url = models.URLField(max_length=1024, null=True, blank=True)
+    csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    total_area_csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    image_labelme_side_by_side_url = models.URLField(
+        max_length=1024, null=True, blank=True
+    )
+    notes = models.TextField(null=True, blank=True)
 
     history = HistoricalRecords(table_name="history_sdb_fp_all_floors_data")
 
@@ -211,22 +202,15 @@ class AllFloorsData(TrackingModel):
 
 class PlanFloor(TrackingModel):
     floor_plan = models.ForeignKey(
-        FloorPlan, related_name="backup_plan_floors", on_delete=models.CASCADE
+        FloorPlan, related_name="sdb_plan_floors", on_delete=models.CASCADE
     )
     floor = models.CharField(max_length=255)  # e.g., "first_floor" or "ground_floor"
-    label_me_url = models.URLField()
-    json_file_url = models.URLField()
-    image_url = models.URLField()
-    labelme_image_url = models.URLField()
-    csv_url = models.URLField()
-    image_side_by_side_url = models.URLField()
-
-    # label_me_url = models.URLField(max_length=1024, null=True, blank=True)
-    # json_file_url = models.URLField(max_length=1024, null=True, blank=True)
-    # image_url = models.URLField(max_length=1024, null=True, blank=True)
-    # labelme_image_url = models.URLField(max_length=1024, null=True, blank=True)
-    # csv_url = models.URLField(max_length=1024, null=True, blank=True)
-    # image_side_by_side_url = models.URLField(max_length=1024, null=True, blank=True)
+    label_me_url = models.URLField(max_length=1024, null=True, blank=True)
+    json_file_url = models.URLField(max_length=1024, null=True, blank=True)
+    image_url = models.URLField(max_length=1024, null=True, blank=True)
+    labelme_image_url = models.URLField(max_length=1024, null=True, blank=True)
+    csv_url = models.URLField(max_length=1024, null=True, blank=True)
+    image_side_by_side_url = models.URLField(max_length=1024, null=True, blank=True)
 
     history = HistoricalRecords(table_name="history_sdb_fp_plan_floors")
 
@@ -240,7 +224,7 @@ class PlanFloor(TrackingModel):
 
 class CsvFloor(TrackingModel):  # AllFloorsCsvfloor
     all_floors_data = models.ForeignKey(
-        AllFloorsData, related_name="backup_csv_floors", on_delete=models.CASCADE
+        AllFloorsData, related_name="sdb_csv_floors", on_delete=models.CASCADE
     )
     floor_name = models.CharField(max_length=100, null=True, blank=True)
     calculated_total_area_metric = models.FloatField(null=True, blank=True)
@@ -259,14 +243,13 @@ class CsvFloor(TrackingModel):  # AllFloorsCsvfloor
 # Mimic CsvRoom model
 class CsvRoom(TrackingModel):
     csv_floor = models.ForeignKey(  # should be csv_floor
-        CsvFloor, on_delete=models.CASCADE, related_name="backup_rooms"
+        CsvFloor, on_delete=models.CASCADE, related_name="sdb_rooms"
     )
     room_name = models.CharField(max_length=100, null=True, blank=True)
     is_segment = models.CharField(max_length=50, null=True, blank=True)
-    room_id = models.FloatField(null=True, blank=True)
-    # room_id = models.FloatField(
-    #     null=True, blank=True, db_index=True  # Index room_id within a floor
-    # )
+    room_id = models.FloatField(
+        null=True, blank=True, db_index=True  # Index room_id within a floor
+    )
     no_of_doors = models.FloatField(null=True, blank=True)
     no_of_windows = models.FloatField(null=True, blank=True)
     no_of_room_points = models.FloatField(null=True, blank=True)
@@ -287,15 +270,16 @@ class CsvRoom(TrackingModel):
 
 class CsvRoomPixelData(TrackingModel):
     csv_room = models.OneToOneField(
-        CsvRoom, on_delete=models.CASCADE, related_name="backup_pixel_data"
+        CsvRoom, on_delete=models.CASCADE, related_name="sdb_pixel_data"
     )
-    min_x_pixels = models.FloatField(null=True, blank=True)
-    min_y_pixels = models.FloatField(null=True, blank=True)
-    max_x_pixels = models.FloatField(null=True, blank=True)
-    max_y_pixels = models.FloatField(null=True, blank=True)
-    max_area_pixels = models.FloatField(null=True, blank=True)
-    actual_area_pixels = models.FloatField(null=True, blank=True)
-    pixel_ratio = models.FloatField(null=True, blank=True)
+    # Numeric fields from CSV for pixel positions and areas:
+    min_x_pixels = models.FloatField(null=True, blank=True)  # Min X Pixels
+    min_y_pixels = models.FloatField(null=True, blank=True)  # Min Y Pixels
+    max_x_pixels = models.FloatField(null=True, blank=True)  # Max X Pixels
+    max_y_pixels = models.FloatField(null=True, blank=True)  # Max Y Pixels
+    max_area_pixels = models.FloatField(null=True, blank=True)  # Max Area Pixels
+    actual_area_pixels = models.FloatField(null=True, blank=True)  # Actual Area Pixels
+    pixel_ratio = models.FloatField(null=True, blank=True)  # Pixel ratio
 
     history = HistoricalRecords(table_name="history_sdb_fp_csv_room_pixel_data")
 
@@ -312,7 +296,7 @@ class CsvRoomPixelData(TrackingModel):
 
 class CsvRoomDimensions(TrackingModel):
     csv_room = models.OneToOneField(
-        CsvRoom, on_delete=models.CASCADE, related_name="backup_dimensions"
+        CsvRoom, on_delete=models.CASCADE, related_name="sdb_dimensions"
     )
     # Text fields for dimensions (Handles 'Unknown')
     dimensions_imperial = models.CharField(max_length=100, null=True, blank=True)
@@ -325,14 +309,6 @@ class CsvRoomDimensions(TrackingModel):
     # Numeric fields for calculated areas:
     calculated_sq_area_metric = models.FloatField(null=True, blank=True)
     calculated_area_imperial = models.FloatField(null=True, blank=True)
-
-    calculated_floor_total_sq_area_metric = models.FloatField(
-        null=True, blank=True
-    )  # remove this
-
-    calculated_floor_total_sq_area_imperial = models.FloatField(
-        null=True, blank=True
-    )  # remove this
 
     history = HistoricalRecords(table_name="history_sdb_fp_csv_room_dimensions")
 
@@ -349,7 +325,7 @@ class CsvRoomDimensions(TrackingModel):
 
 class CsvRoomScalingFactors(TrackingModel):
     csv_room = models.OneToOneField(
-        CsvRoom, on_delete=models.CASCADE, related_name="backup_scaling_factors"
+        CsvRoom, on_delete=models.CASCADE, related_name="sdb_scaling_factors"
     )
     scale_metric = models.FloatField(null=True, blank=True)
     scale_imperial = models.FloatField(null=True, blank=True)
@@ -389,73 +365,57 @@ class AllFloorsCsvData(TrackingModel):
     no_of_door = models.FloatField(null=True, blank=True)
     no_of_window = models.FloatField(null=True, blank=True)
     no_of_room_points = models.FloatField(null=True, blank=True)
-    min_x_pixels = models.FloatField(null=True, blank=True)
-    min_y_pixels = models.FloatField(null=True, blank=True)
-    max_x_pixels = models.FloatField(null=True, blank=True)
-    max_y_pixels = models.FloatField(null=True, blank=True)
-    max_area_metric = models.FloatField(null=True, blank=True)
-    max_area_imperial = models.FloatField(null=True, blank=True)
-    max_area_pixels = models.FloatField(null=True, blank=True)
-    actual_area_pixels = models.FloatField(null=True, blank=True)
-    pixel_ratio = models.FloatField(null=True, blank=True)
-    scale_metric = models.FloatField(null=True, blank=True)
-    scale_imperial = models.FloatField(null=True, blank=True)
-    calculated_sq_area_metric = models.FloatField(null=True, blank=True)
-    calculated_floor_total_sq_area_metric = models.FloatField(null=True, blank=True)
-    calculated_area_imperial = models.FloatField(null=True, blank=True)
-    calculated_floor_total_sq_area_imperial = models.FloatField(null=True, blank=True)
-    # Add other fields if they exist in the source model/CSV (e.g., the numbered columns)
 
-    # min_x_pixels = models.FloatField(
-    #     null=True, blank=True, db_column="min_x_pixels_csv"
-    # )  # Use db_column if name conflicts/desired
-    # min_y_pixels = models.FloatField(
-    #     null=True, blank=True, db_column="min_y_pixels_csv"
-    # )
-    # max_x_pixels = models.FloatField(
-    #     null=True, blank=True, db_column="max_x_pixels_csv"
-    # )
-    # max_y_pixels = models.FloatField(
-    #     null=True, blank=True, db_column="max_y_pixels_csv"
-    # )
-    # max_area_metric = models.FloatField(
-    #     null=True, blank=True, db_column="max_area_metric_csv"
-    # )
-    # max_area_imperial = models.FloatField(
-    #     null=True, blank=True, db_column="max_area_imperial_csv"
-    # )
-    # max_area_pixels = models.FloatField(
-    #     null=True, blank=True, db_column="max_area_pixels_csv"
-    # )
-    # actual_area_pixels = models.FloatField(
-    #     null=True, blank=True, db_column="actual_area_pixels_csv"
-    # )
-    # pixel_ratio = models.FloatField(null=True, blank=True, db_column="pixel_ratio_csv")
-    # scale_metric = models.FloatField(
-    #     null=True, blank=True, db_column="scale_metric_csv"
-    # )
-    # scale_imperial = models.FloatField(
-    #     null=True, blank=True, db_column="scale_imperial_csv"
-    # )
-    # calculated_sq_area_metric = models.FloatField(
-    #     null=True, blank=True, db_column="calculated_sq_area_metric_csv"
-    # )
-    # calculated_floor_total_sq_area_metric = models.FloatField(
-    #     null=True, blank=True, db_column="calc_floor_total_metric_csv"
-    # )
-    # calculated_area_imperial = models.FloatField(
-    #     null=True, blank=True, db_column="calculated_area_imperial_csv"
-    # )  # Note lowercase 'c'
-    # calculated_floor_total_sq_area_imperial = models.FloatField(
-    #     null=True, blank=True, db_column="calc_floor_total_imperial_csv"
-    # )
+    min_x_pixels = models.FloatField(
+        null=True, blank=True, db_column="min_x_pixels_csv"
+    )  # Use db_column if name conflicts/desired
+    min_y_pixels = models.FloatField(
+        null=True, blank=True, db_column="min_y_pixels_csv"
+    )
+    max_x_pixels = models.FloatField(
+        null=True, blank=True, db_column="max_x_pixels_csv"
+    )
+    max_y_pixels = models.FloatField(
+        null=True, blank=True, db_column="max_y_pixels_csv"
+    )
+    max_area_metric = models.FloatField(
+        null=True, blank=True, db_column="max_area_metric_csv"
+    )
+    max_area_imperial = models.FloatField(
+        null=True, blank=True, db_column="max_area_imperial_csv"
+    )
+    max_area_pixels = models.FloatField(
+        null=True, blank=True, db_column="max_area_pixels_csv"
+    )
+    actual_area_pixels = models.FloatField(
+        null=True, blank=True, db_column="actual_area_pixels_csv"
+    )
+    pixel_ratio = models.FloatField(null=True, blank=True, db_column="pixel_ratio_csv")
+    scale_metric = models.FloatField(
+        null=True, blank=True, db_column="scale_metric_csv"
+    )
+    scale_imperial = models.FloatField(
+        null=True, blank=True, db_column="scale_imperial_csv"
+    )
+    calculated_sq_area_metric = models.FloatField(
+        null=True, blank=True, db_column="calculated_sq_area_metric_csv"
+    )
+    calculated_floor_total_sq_area_metric = models.FloatField(
+        null=True, blank=True, db_column="calc_floor_total_metric_csv"
+    )
+    calculated_area_imperial = models.FloatField(
+        null=True, blank=True, db_column="calculated_area_imperial_csv"
+    )  # Note lowercase 'c'
+    calculated_floor_total_sq_area_imperial = models.FloatField(
+        null=True, blank=True, db_column="calc_floor_total_imperial_csv"
+    )
 
     history = HistoricalRecords(table_name="history_sdb_all_floors_csv_data")
 
     class Meta:
         db_table = "sdb_all_floors_csv_data"
-        verbose_name = "All Floors CSV Raw Row"
-        verbose_name_plural = "All Floors CSV Raw Rows"
+        verbose_name = "All Floors CSV Data"
+        verbose_name_plural = "All Floors CSV Data"
         indexes = [
             models.Index(fields=["all_floors_data", "floor_name"]),
             models.Index(fields=["all_floors_data", "room_id"]),
@@ -469,7 +429,7 @@ class AllFloorsCsvData(TrackingModel):
 
 
 class TotalAreasCsvData(TrackingModel):
-    """Stores parsed data from the total_area.csv file (backup)."""
+    """Stores parsed data from the total_area.csv file."""
 
     all_floors_data = models.ForeignKey(
         AllFloorsData, related_name="total_areas_csv_data", on_delete=models.CASCADE

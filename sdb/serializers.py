@@ -1,7 +1,9 @@
 from django.db import transaction
 from rest_framework import serializers
 
-from backup.models import (
+# Use standard logging or your custom config
+from pabackup_service.config.logging_config import configure_logger
+from sdb.models import (
     AllFloorsCsvData,
     AllFloorsData,
     AnalysisTask,
@@ -17,9 +19,6 @@ from backup.models import (
     ScrapingJob,
     TotalAreasCsvData,
 )
-
-# Use standard logging or your custom config
-from pabackup_service.config.logging_config import configure_logger
 
 logger = configure_logger(__name__)
 
@@ -66,7 +65,7 @@ class ScrapingJobSerializer(serializers.ModelSerializer):
         )
 
 
-# ––––––– Serializers for Nested Backup Data –––––––
+# ––––––– Serializers for Nested sdb Data –––––––
 
 # --- Leaf Node Serializers (Define these first) ---
 
@@ -127,7 +126,7 @@ class TotalAreasCsvDataSerializer(serializers.ModelSerializer):
         exclude = ("all_floors_data", "id", "created_at", "updated_at")
 
 
-# --- Serializers used DIRECTLY by CompleteBackupFloorPlanSerializer (Define Before It) ---
+# --- Serializers used DIRECTLY by CompletesdbFloorPlanSerializer (Define Before It) ---
 # Moved FloorPlanAnalysisResultSerializer UP
 class FloorPlanAnalysisResultSerializer(serializers.ModelSerializer):
     class Meta:
@@ -152,9 +151,9 @@ class PlanFloorSerializer(serializers.ModelSerializer):
 
 
 class CsvRoomSerializer(serializers.ModelSerializer):
-    backup_pixel_data = CsvRoomPixelDataSerializer(required=False, allow_null=True)
-    backup_dimensions = CsvRoomDimensionsSerializer(required=False, allow_null=True)
-    backup_scaling_factors = CsvRoomScalingFactorsSerializer(
+    sdb_pixel_data = CsvRoomPixelDataSerializer(required=False, allow_null=True)
+    sdb_dimensions = CsvRoomDimensionsSerializer(required=False, allow_null=True)
+    sdb_scaling_factors = CsvRoomScalingFactorsSerializer(
         required=False, allow_null=True
     )
 
@@ -164,17 +163,17 @@ class CsvRoomSerializer(serializers.ModelSerializer):
 
 
 class CsvFloorSerializer(serializers.ModelSerializer):
-    backup_rooms = CsvRoomSerializer(many=True, required=False, default=[])
+    sdb_rooms = CsvRoomSerializer(many=True, required=False, default=[])
 
     class Meta:
         model = CsvFloor
         exclude = ("all_floors_data", "id", "created_at", "updated_at")
 
 
-# --- AllFloorsDataSerializer (Define Before CompleteBackupFloorPlanSerializer) ---
+# --- AllFloorsDataSerializer (Define Before CompletesdbFloorPlanSerializer) ---
 class AllFloorsDataSerializer(serializers.ModelSerializer):
     # Nested serializers for write operations
-    backup_csv_floors = CsvFloorSerializer(many=True, required=False, default=[])
+    sdb_csv_floors = CsvFloorSerializer(many=True, required=False, default=[])
     all_floors_csv_data = AllFloorsCsvDataSerializer(
         many=True, required=False, default=[]
     )
@@ -189,8 +188,8 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Creates AllFloorsData and all its nested children."""
         # ... (create logic remains the same as before) ...
-        backup_csv_floors_data = validated_data.pop("backup_csv_floors", [])
-        backup_raw_rows_data = validated_data.pop("all_floors_csv_data", [])
+        sdb_csv_floors_data = validated_data.pop("sdb_csv_floors", [])
+        sdb_raw_rows_data = validated_data.pop("all_floors_csv_data", [])
         total_areas_csv_data = validated_data.pop("total_areas_csv_data", [])
 
         all_floors_data_instance = AllFloorsData.objects.create(**validated_data)
@@ -199,8 +198,8 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
         )
 
         # --- Create Nested CsvFloor -> CsvRoom -> Details ---
-        for csv_floor_data in backup_csv_floors_data:
-            backup_rooms_data = csv_floor_data.pop("backup_rooms", [])
+        for csv_floor_data in sdb_csv_floors_data:
+            sdb_rooms_data = csv_floor_data.pop("sdb_rooms", [])
             csv_floor_instance = CsvFloor.objects.create(
                 all_floors_data=all_floors_data_instance, **csv_floor_data
             )
@@ -213,10 +212,10 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
             dimensions_data_to_create_map = {}
             scaling_factors_to_create_map = {}
 
-            for idx, room_data in enumerate(backup_rooms_data):
-                pixel_data = room_data.pop("backup_pixel_data", None)
-                dimensions_data = room_data.pop("backup_dimensions", None)
-                scaling_factors_data = room_data.pop("backup_scaling_factors", None)
+            for idx, room_data in enumerate(sdb_rooms_data):
+                pixel_data = room_data.pop("sdb_pixel_data", None)
+                dimensions_data = room_data.pop("sdb_dimensions", None)
+                scaling_factors_data = room_data.pop("sdb_scaling_factors", None)
 
                 room_instance = CsvRoom(csv_floor=csv_floor_instance, **room_data)
                 rooms_to_create.append(room_instance)
@@ -272,7 +271,7 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
         # --- Bulk Create AllFloorsCsvData ---
         raw_rows_to_create = [
             AllFloorsCsvData(all_floors_data=all_floors_data_instance, **raw_row_data)
-            for raw_row_data in backup_raw_rows_data
+            for raw_row_data in sdb_raw_rows_data
         ]
         if raw_rows_to_create:
             AllFloorsCsvData.objects.bulk_create(raw_rows_to_create)
@@ -300,11 +299,11 @@ class AllFloorsDataSerializer(serializers.ModelSerializer):
 # ––––––– Top Level Serializer (Define Last, as it uses others) –––––––
 
 
-class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
+class CompletesdbFloorPlanSerializer(serializers.ModelSerializer):
     # Nested serializers required for processing the input payload
     analysis_result = FloorPlanAnalysisResultSerializer()
-    backup_all_floors_data = AllFloorsDataSerializer(required=False, allow_null=True)
-    backup_plan_floors = PlanFloorSerializer(many=True, required=False, default=[])
+    sdb_all_floors_data = AllFloorsDataSerializer(required=False, allow_null=True)
+    sdb_plan_floors = PlanFloorSerializer(many=True, required=False, default=[])
 
     class Meta:
         model = FloorPlan
@@ -312,8 +311,9 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
             "analysis_result",
             "floorplan_id",
             "original_url",
-            "backup_all_floors_data",
-            "backup_plan_floors",
+            "update_count",
+            "sdb_all_floors_data",
+            "sdb_plan_floors",
             "id",
             "created_at",
             "updated_at",
@@ -322,16 +322,14 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        """Handles creation or update of a FloorPlan backup and its entire nested structure."""
+        """Handles creation or update of a FloorPlan and its entire nested structure."""
         # ... (create logic remains the same as before) ...
         analysis_result_data = validated_data.pop("analysis_result")
-        backup_all_floors_data_payload = validated_data.pop(
-            "backup_all_floors_data", None
-        )
-        backup_plan_floors_payload = validated_data.pop("backup_plan_floors", [])
+        sdb_all_floors_data_payload = validated_data.pop("sdb_all_floors_data", None)
+        sdb_plan_floors_payload = validated_data.pop("sdb_plan_floors", [])
         floorplan_lookup_id = validated_data.get("floorplan_id")
         logger.info(
-            f"Processing backup create/update for floorplan_id: {floorplan_lookup_id}"
+            f"Processing sdb create/update for floorplan_id: {floorplan_lookup_id}"
         )
 
         analysis_result_instance, created_ar = (
@@ -345,10 +343,17 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
             f"{'Created' if created_ar else 'Found'} FloorPlanAnalysisResult ID: {analysis_result_instance.id}"
         )
 
+        # Prepare defaults for FloorPlan update_or_create
+        floorplan_defaults = {
+            "original_url": validated_data.get("original_url"),
+            # Get update_count from payload, default to 0 if not provided (important for robustness)
+            "update_count": validated_data.get("update_count", 0),
+        }
+
         floorplan_instance, created_fp = FloorPlan.objects.update_or_create(
             analysis_result=analysis_result_instance,
             floorplan_id=floorplan_lookup_id,
-            defaults={"original_url": validated_data.get("original_url")},
+            defaults=floorplan_defaults,
         )
         logger.debug(
             f"{'Created' if created_fp else 'Found'} FloorPlan ID: {floorplan_instance.id} (Floorplan_id field: {floorplan_lookup_id})"
@@ -360,44 +365,44 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
             )
             try:
                 if (
-                    hasattr(floorplan_instance, "backup_all_floors_data")
-                    and floorplan_instance.backup_all_floors_data
+                    hasattr(floorplan_instance, "sdb_all_floors_data")
+                    and floorplan_instance.sdb_all_floors_data
                 ):
                     logger.debug(
-                        f"Deleting existing AllFloorsData ID: {floorplan_instance.backup_all_floors_data.id}"
+                        f"Deleting existing AllFloorsData ID: {floorplan_instance.sdb_all_floors_data.id}"
                     )
-                    floorplan_instance.backup_all_floors_data.delete()
+                    floorplan_instance.sdb_all_floors_data.delete()
             except AllFloorsData.DoesNotExist:
                 logger.debug("No existing AllFloorsData found to delete.")
 
-            deleted_pf_count, _ = floorplan_instance.backup_plan_floors.all().delete()
+            deleted_pf_count, _ = floorplan_instance.sdb_plan_floors.all().delete()
             logger.debug(f"Deleted {deleted_pf_count} existing PlanFloor instances.")
             logger.info(
                 f"Finished deleting old nested data for FloorPlan {floorplan_lookup_id}."
             )
 
-        if backup_all_floors_data_payload:
+        if sdb_all_floors_data_payload:
             logger.debug(
                 f"Creating new AllFloorsData structure for FloorPlan {floorplan_lookup_id}..."
             )
             all_floors_serializer = AllFloorsDataSerializer(
-                data=backup_all_floors_data_payload
+                data=sdb_all_floors_data_payload
             )
             all_floors_serializer.is_valid(raise_exception=True)
             all_floors_serializer.save(floor_plan=floorplan_instance)
             logger.debug(f"Successfully created new AllFloorsData structure.")
         else:
             logger.debug(
-                "No 'backup_all_floors_data' provided in payload, skipping creation."
+                "No 'sdb_all_floors_data' provided in payload, skipping creation."
             )
 
-        if backup_plan_floors_payload:
+        if sdb_plan_floors_payload:
             logger.debug(
-                f"Creating {len(backup_plan_floors_payload)} new PlanFloor instances..."
+                f"Creating {len(sdb_plan_floors_payload)} new PlanFloor instances..."
             )
             plan_floors_to_create = [
                 PlanFloor(floor_plan=floorplan_instance, **pf_data)
-                for pf_data in backup_plan_floors_payload
+                for pf_data in sdb_plan_floors_payload
             ]
             if plan_floors_to_create:
                 PlanFloor.objects.bulk_create(plan_floors_to_create)
@@ -405,18 +410,14 @@ class CompleteBackupFloorPlanSerializer(serializers.ModelSerializer):
                     f"Bulk created {len(plan_floors_to_create)} PlanFloor instances."
                 )
         else:
-            logger.debug(
-                "No 'backup_plan_floors' provided in payload, skipping creation."
-            )
+            logger.debug("No 'sdb_plan_floors' provided in payload, skipping creation.")
 
-        logger.info(
-            f"Finished processing backup for floorplan_id: {floorplan_lookup_id}"
-        )
+        logger.info(f"Finished processing sdb for floorplan_id: {floorplan_lookup_id}")
         return floorplan_instance
 
     def update(self, instance, validated_data):
         logger.warning(
-            "Direct call to CompleteBackupFloorPlanSerializer.update() is not the intended flow for create-or-replace logic."
+            "Direct call to CompletesdbFloorPlanSerializer.update() is not the intended flow for create-or-replace logic."
         )
         raise NotImplementedError(
             "Update logic is handled within the create method for create-or-replace behavior."

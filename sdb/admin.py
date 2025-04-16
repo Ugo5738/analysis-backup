@@ -3,7 +3,7 @@ from django.contrib.admin import SimpleListFilter
 from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html
 
-from backup.models import (
+from sdb.models import (
     AllFloorsCsvData,
     AllFloorsData,
     AnalysisTask,
@@ -304,7 +304,7 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
         if obj.property_primary_key:
             try:
                 url = reverse(
-                    "admin:backup_property_change", args=[obj.property_primary_key]
+                    "admin:sdb_property_change", args=[obj.property_primary_key]
                 )
                 return format_html('<a href="{}">{}</a>', url, obj.property_primary_key)
             except NoReverseMatch:
@@ -369,7 +369,7 @@ class ScrapingJobAdmin(admin.ModelAdmin):
     def property_link(self, obj):
         if obj.property_id:
             try:
-                url = reverse("admin:backup_property_change", args=[obj.property_id])
+                url = reverse("admin:sdb_property_change", args=[obj.property_id])
                 return format_html('<a href="{}">{}</a>', url, obj.property_id)
             except NoReverseMatch:
                 return f"{obj.property_id} (Link Error)"
@@ -381,7 +381,7 @@ class ScrapingJobAdmin(admin.ModelAdmin):
     def task_link(self, obj):
         if obj.task_id:
             try:
-                url = reverse("admin:backup_analysistask_change", args=[obj.task_id])
+                url = reverse("admin:sdb_analysistask_change", args=[obj.task_id])
                 return format_html('<a href="{}">{}</a>', url, obj.task_id)
             except NoReverseMatch:
                 return f"{obj.task_id} (Link Error)"
@@ -441,7 +441,7 @@ class AllFloorsDataAdmin(admin.ModelAdmin):
 
     def floor_plan_link(self, obj):
         if obj.floor_plan:
-            url = reverse("admin:backup_floorplan_change", args=[obj.floor_plan.id])
+            url = reverse("admin:sdb_floorplan_change", args=[obj.floor_plan.id])
             return format_html(
                 '<a href="{}">{} (ID: {})</a>',
                 url,
@@ -502,7 +502,7 @@ class PlanFloorAdmin(admin.ModelAdmin):
 
     def floor_plan_link(self, obj):
         if obj.floor_plan:
-            url = reverse("admin:backup_floorplan_change", args=[obj.floor_plan.id])
+            url = reverse("admin:sdb_floorplan_change", args=[obj.floor_plan.id])
             return format_html(
                 '<a href="{}">{} (ID: {})</a>',
                 url,
@@ -543,7 +543,7 @@ class CsvFloorAdmin(admin.ModelAdmin):
     def all_floors_data_link(self, obj):
         if obj.all_floors_data:
             url = reverse(
-                "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+                "admin:sdb_allfloorsdata_change", args=[obj.all_floors_data.id]
             )
             fp_id = (
                 obj.all_floors_data.floor_plan.floorplan_id
@@ -579,7 +579,7 @@ class CsvRoomAdmin(admin.ModelAdmin):
 
     def csv_floor_link(self, obj):
         if obj.csv_floor:
-            url = reverse("admin:backup_csvfloor_change", args=[obj.csv_floor.id])
+            url = reverse("admin:sdb_csvfloor_change", args=[obj.csv_floor.id])
             return format_html(
                 '<a href="{}">{} (ID: {})</a>',
                 url,
@@ -610,7 +610,7 @@ class CsvRoomPixelDataAdmin(admin.ModelAdmin):
 
     def csv_room_link(self, obj):
         if obj.csv_room:
-            url = reverse("admin:backup_csvroom_change", args=[obj.csv_room.id])
+            url = reverse("admin:sdb_csvroom_change", args=[obj.csv_room.id])
             return format_html(
                 '<a href="{}">{} (ID: {})</a>',
                 url,
@@ -676,7 +676,7 @@ class AllFloorsCsvDataAdmin(admin.ModelAdmin):
         "room_id",
         "all_floors_data__floor_plan__floorplan_id",
     )
-    # Make fields read-only as it's backup data
+    # Make fields read-only as it's sdb data
     readonly_fields = [f.name for f in AllFloorsCsvData._meta.get_fields()]
     list_select_related = ("all_floors_data__floor_plan",)
     list_per_page = 100
@@ -685,7 +685,7 @@ class AllFloorsCsvDataAdmin(admin.ModelAdmin):
         if obj.all_floors_data:
             try:
                 url = reverse(
-                    "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+                    "admin:sdb_allfloorsdata_change", args=[obj.all_floors_data.id]
                 )
                 fp_id = (
                     obj.all_floors_data.floor_plan.floorplan_id
@@ -726,7 +726,7 @@ class TotalAreasCsvDataAdmin(admin.ModelAdmin):
         if obj.all_floors_data:
             try:
                 url = reverse(
-                    "admin:backup_allfloorsdata_change", args=[obj.all_floors_data.id]
+                    "admin:sdb_allfloorsdata_change", args=[obj.all_floors_data.id]
                 )
                 fp_id = (
                     obj.all_floors_data.floor_plan.floorplan_id

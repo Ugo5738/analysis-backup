@@ -2,18 +2,18 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from backup.models import AnalysisTask, Property, ScrapingJob
-from backup.serializers import (
+from sdb.models import AnalysisTask, Property, ScrapingJob
+from sdb.serializers import (
     AnalysisTaskSerializer,
-    CompleteBackupFloorPlanSerializer,
+    CompletesdbFloorPlanSerializer,
     PropertySerializer,
     ScrapingJobSerializer,
 )
 
 
-class BackupPropertyView(APIView):
+class SDBPropertyView(APIView):
     """
-    API endpoint to create, update, and list backup properties.
+    API endpoint to create, update, and list sdb properties.
     """
 
     def post(self, request, *args, **kwargs):
@@ -21,9 +21,9 @@ class BackupPropertyView(APIView):
 
         try:
             # If it already exists, we do an update
-            backup_property = Property.objects.get(primary_key=primary_key)
+            sdb_property = Property.objects.get(primary_key=primary_key)
             serializer = PropertySerializer(
-                backup_property, data=request.data, partial=True
+                sdb_property, data=request.data, partial=True
             )
         except Property.DoesNotExist:
             # Otherwise create a new one
@@ -36,15 +36,15 @@ class BackupPropertyView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, *args, **kwargs):
-        # Return all backup properties (or filter as needed)
+        # Return all sdb properties (or filter as needed)
         properties = Property.objects.all()
         serializer = PropertySerializer(properties, many=True)
         return Response(serializer.data)
 
 
-class BackupAnalysisTaskView(APIView):
+class SDBAnalysisTaskView(APIView):
     """
-    API endpoint to create and list backup analysis tasks.
+    API endpoint to create and list sdb analysis tasks.
     """
 
     def post(self, request, *args, **kwargs):
@@ -60,7 +60,7 @@ class BackupAnalysisTaskView(APIView):
         return Response(serializer.data)
 
 
-class BackupScrapingJobView(APIView):
+class SDBScrapingJobView(APIView):
     def post(self, request, *args, **kwargs):
         serializer = ScrapingJobSerializer(data=request.data)
         if serializer.is_valid():
@@ -74,13 +74,13 @@ class BackupScrapingJobView(APIView):
         return Response(serializer.data)
 
 
-class CompleteBackupFloorPlanView(APIView):
+class CompleteSDBFloorPlanView(APIView):
     """
-    API endpoint to receive and store the complete backup of floorplan data.
+    API endpoint to receive and store the complete floorplan data.
     """
 
     def post(self, request, *args, **kwargs):
-        serializer = CompleteBackupFloorPlanSerializer(data=request.data)
+        serializer = CompletesdbFloorPlanSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
