@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from pabackup_service.config.logging_config import configure_logger
 from sdb.models import AnalysisTask, Property, ScrapingJob
 from sdb.serializers import (
     AnalysisTaskSerializer,
@@ -9,6 +10,8 @@ from sdb.serializers import (
     PropertySerializer,
     ScrapingJobSerializer,
 )
+
+logger = configure_logger(__name__)
 
 
 class SDBPropertyView(APIView):
@@ -62,11 +65,57 @@ class SDBAnalysisTaskView(APIView):
 
 class SDBScrapingJobView(APIView):
     def post(self, request, *args, **kwargs):
-        serializer = ScrapingJobSerializer(data=request.data)
+        primary_key = request.data.get("primary_key")
+
+        if primary_key is None:
+            return Response(
+                {"error": "Missing 'primary_key' in request data."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Attempt to find an existing job in the SDB database
+            sdb_job = ScrapingJob.objects.get(primary_key=primary_key)
+            # If found, initialize serializer for an UPDATE operation
+            # Use partial=True to allow updating only the fields provided,
+            # though in a sync, you usually send all relevant fields.
+            serializer = ScrapingJobSerializer(sdb_job, data=request.data, partial=True)
+            operation = "update"
+        except ScrapingJob.DoesNotExist:
+            # If not found, initialize serializer for a CREATE operation
+            serializer = ScrapingJobSerializer(data=request.data)
+            operation = "create"
+        except ValueError:
+            # Handle cases where primary_key is not a valid integer/type
+            return Response(
+                {"error": f"Invalid 'primary_key' format: {primary_key}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                serializer.save()
+                response_status = (
+                    status.HTTP_200_OK
+                    if operation == "update"
+                    else status.HTTP_201_CREATED
+                )
+                return Response(serializer.data, status=response_status)
+            except Exception as e:
+                # Catch potential errors during save (less likely after is_valid)
+                logger.error(
+                    f"Error saving ScrapingJob PK={primary_key}: {e}", exc_info=True
+                )
+                return Response(
+                    {"error": f"Failed to save scraping job: {e}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+        else:
+            # Log the validation errors for debugging
+            logger.warning(
+                f"Invalid data received for ScrapingJob PK={primary_key}: {serializer.errors}"
+            )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, *args, **kwargs):
         jobs = ScrapingJob.objects.all()
