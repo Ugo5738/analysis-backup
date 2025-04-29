@@ -23,10 +23,51 @@ from sdb.models import (
 logger = configure_logger(__name__)
 
 
+# ––––––– Simple Serializers for Data Sync –––––––
+class SimplePropertySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Property
+        fields = ["primary_key", "updated_at"]  # Only fields needed for check
+
+
+class SimpleScrapingJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ScrapingJob
+        fields = [
+            "primary_key",
+            "updated_at",
+            "status",
+        ]  # Add status or other relevant fields
+
+
+class SimpleAnalysisTaskSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AnalysisTask
+        fields = ["primary_key", "updated_at", "status"]
+
+
+class SimpleFPAResultSerializer(serializers.ModelSerializer):
+    # Use a unique identifier combination if PK isn't directly comparable
+    unique_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FloorPlanAnalysisResult
+        fields = ["id", "unique_id", "updated_at"]
+
+    def get_unique_id(self, obj):
+        return f"{obj.user_id}|{obj.property_id}"
+
+
+class SimpleFloorPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FloorPlan
+        fields = ["id", "floorplan_id", "updated_at"]
+
+
+# ––––––– Simple Serializers for Data Sync ––––––
+
+
 # ––––––– Basic Serializers –––––––
-# PropertySerializer, AnalysisTaskSerializer, ScrapingJobSerializer remain here...
-
-
 class PropertySerializer(serializers.ModelSerializer):
     phone_number = serializers.CharField(
         write_only=True, required=False, allow_null=True, allow_blank=True

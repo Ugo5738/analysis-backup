@@ -1,17 +1,76 @@
 from rest_framework import status
+from rest_framework.generics import ListAPIView
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pabackup_service.config.logging_config import configure_logger
-from sdb.models import AnalysisTask, Property, ScrapingJob
+from sdb.models import AnalysisTask as SDBAnalysisTask
+from sdb.models import FloorPlan as SDBFloorPlan
+from sdb.models import FloorPlanAnalysisResult as SDBFPAResult
+from sdb.models import Property as SDBProperty
+from sdb.models import ScrapingJob as SDBScrapingJob
 from sdb.serializers import (
     AnalysisTaskSerializer,
     CompletesdbFloorPlanSerializer,
     PropertySerializer,
     ScrapingJobSerializer,
+    SimpleAnalysisTaskSerializer,
+    SimpleFloorPlanSerializer,
+    SimpleFPAResultSerializer,
+    SimplePropertySerializer,
+    SimpleScrapingJobSerializer,
 )
 
 logger = configure_logger(__name__)
+
+
+# ––––––– Simple Views for Data Sync –––––––
+# Standard Pagination Class (Optional but recommended for large datasets)
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 1000  # Fetch large batches for efficiency
+    page_size_query_param = "page_size"
+    max_page_size = 5000
+
+
+# New List Views for Consistency Check
+class SDBPropertyListCheckView(ListAPIView):
+    queryset = SDBProperty.objects.all().order_by("primary_key")
+    serializer_class = SimplePropertySerializer
+    pagination_class = StandardResultsSetPagination
+    permission_classes = [AllowAny]  # Or IsAuthenticated if needed
+
+
+class SDBScrapingJobListCheckView(ListAPIView):
+    queryset = SDBScrapingJob.objects.all().order_by("primary_key")
+    serializer_class = SimpleScrapingJobSerializer
+    pagination_class = StandardResultsSetPagination
+    permission_classes = [AllowAny]
+
+
+class SDBAnalysisTaskListCheckView(ListAPIView):
+    queryset = SDBAnalysisTask.objects.all().order_by("primary_key")
+    serializer_class = SimpleAnalysisTaskSerializer
+    pagination_class = StandardResultsSetPagination
+    permission_classes = [AllowAny]
+
+
+class SDBFPAResultListCheckView(ListAPIView):
+    queryset = SDBFPAResult.objects.all().order_by("id")
+    serializer_class = SimpleFPAResultSerializer
+    pagination_class = StandardResultsSetPagination
+    permission_classes = [AllowAny]
+
+
+class SDBFloorPlanListCheckView(ListAPIView):
+    queryset = SDBFloorPlan.objects.all().order_by("id")
+    serializer_class = SimpleFloorPlanSerializer
+    pagination_class = StandardResultsSetPagination
+    permission_classes = [AllowAny]
+
+
+# ––––––– Simple Views for Data Sync –––––––
 
 
 class SDBPropertyView(APIView):
@@ -24,11 +83,11 @@ class SDBPropertyView(APIView):
 
         try:
             # If it already exists, we do an update
-            sdb_property = Property.objects.get(primary_key=primary_key)
+            sdb_property = SDBProperty.objects.get(primary_key=primary_key)
             serializer = PropertySerializer(
                 sdb_property, data=request.data, partial=True
             )
-        except Property.DoesNotExist:
+        except SDBProperty.DoesNotExist:
             # Otherwise create a new one
             serializer = PropertySerializer(data=request.data)
 
@@ -40,7 +99,7 @@ class SDBPropertyView(APIView):
 
     def get(self, request, *args, **kwargs):
         # Return all sdb properties (or filter as needed)
-        properties = Property.objects.all()
+        properties = SDBProperty.objects.all()
         serializer = PropertySerializer(properties, many=True)
         return Response(serializer.data)
 
@@ -66,13 +125,13 @@ class SDBAnalysisTaskView(APIView):
 
         try:
             # Attempt to find an existing task in the SDB database
-            sdb_task = AnalysisTask.objects.get(primary_key=primary_key)
+            sdb_task = SDBAnalysisTask.objects.get(primary_key=primary_key)
             # If found, initialize serializer for an UPDATE operation
             serializer = AnalysisTaskSerializer(
                 sdb_task, data=request.data, partial=True
             )
             operation = "update"
-        except AnalysisTask.DoesNotExist:
+        except SDBAnalysisTask.DoesNotExist:
             # If not found, initialize serializer for a CREATE operation
             # Pass property_primary_key in context if needed by serializer during create validation
             # (Though AnalysisTaskSerializer doesn't seem to need it directly for validation)
@@ -131,7 +190,7 @@ class SDBAnalysisTaskView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, *args, **kwargs):
-        tasks = AnalysisTask.objects.all()
+        tasks = SDBAnalysisTask.objects.all()
         serializer = AnalysisTaskSerializer(tasks, many=True)
         return Response(serializer.data)
 
@@ -148,13 +207,13 @@ class SDBScrapingJobView(APIView):
 
         try:
             # Attempt to find an existing job in the SDB database
-            sdb_job = ScrapingJob.objects.get(primary_key=primary_key)
+            sdb_job = SDBScrapingJob.objects.get(primary_key=primary_key)
             # If found, initialize serializer for an UPDATE operation
             # Use partial=True to allow updating only the fields provided,
             # though in a sync, you usually send all relevant fields.
             serializer = ScrapingJobSerializer(sdb_job, data=request.data, partial=True)
             operation = "update"
-        except ScrapingJob.DoesNotExist:
+        except SDBScrapingJob.DoesNotExist:
             # If not found, initialize serializer for a CREATE operation
             serializer = ScrapingJobSerializer(data=request.data)
             operation = "create"
@@ -191,7 +250,7 @@ class SDBScrapingJobView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, *args, **kwargs):
-        jobs = ScrapingJob.objects.all()
+        jobs = SDBScrapingJob.objects.all()
         serializer = ScrapingJobSerializer(jobs, many=True)
         return Response(serializer.data)
 
